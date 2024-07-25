@@ -1,0 +1,12 @@
+{
+    "$schema": "../workload_schema.json",
+    "sections": [
+        {
+            "inserts": {
+                "amount": 1000,
+                "key_len": 10,
+                "val_len": 20
+            }
+        }
+    ]
+}

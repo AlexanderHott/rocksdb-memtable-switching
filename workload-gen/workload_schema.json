@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkloadSpec",
+  "type": "object",
+  "required": [
+    "sections"
+  ],
+  "properties": {
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/WorkloadSpecSection"
+      }
+    }
+  },
+  "definitions": {
+    "Deletes": {
+      "description": "Specification for point deletes in a workload section.",
+      "type": "object",
+      "required": [
+        "amount"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of deletes",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Inserts": {
+      "description": "Specification for inserts in a workload section.",
+      "type": "object",
+      "required": [
+        "amount",
+        "key_len",
+        "val_len"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of inserts in the section",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "key_len": {
+          "description": "Key length",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "val_len": {
+          "description": "Value length",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PointQueries": {
+      "description": "Specification for point queries in a workload section.",
+      "type": "object",
+      "required": [
+        "amount"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of point queries",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "RangeQueries": {
+      "description": "Specification for range queries in a workload section.",
+      "type": "object",
+      "required": [
+        "amount",
+        "selectivity"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of range queries",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "selectivity": {
+          "description": "Selectivity of range queries. Based off of the range of valid keys, not the full key-space.",
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "Updates": {
+      "description": "Specification for updates in a workload section.",
+      "type": "object",
+      "required": [
+        "amount",
+        "val_len"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of updates",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "val_len": {
+          "description": "Value length",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "WorkloadSpecSection": {
+      "type": "object",
+      "properties": {
+        "deletes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Deletes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inserts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Inserts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "point_queries": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PointQueries"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range_queries": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RangeQueries"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updates": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Updates"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
