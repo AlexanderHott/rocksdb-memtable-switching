@@ -18,7 +18,7 @@
             },
             "updates": {
                 "amount": 50,
-                "val_size": 10
+                "val_len": 10
             },
             "deletes": {
                 "amount": 50
