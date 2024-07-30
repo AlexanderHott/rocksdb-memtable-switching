@@ -6,8 +6,8 @@
 namespace Default {
 
 const unsigned int ENTRY_SIZE = 16;
-const unsigned int ENTRIES_PER_PAGE = 2048;
-const unsigned int BUFFER_SIZE_IN_PAGES = 16;
+const unsigned int ENTRIES_PER_PAGE = 1024;
+const unsigned int BUFFER_SIZE_IN_PAGES = 64;
 
 const double SIZE_RATIO = 4;
 const unsigned int FILE_TO_MEMTABLE_SIZE_RATIO = 1;

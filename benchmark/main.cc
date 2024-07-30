@@ -12,6 +12,8 @@
 #include "db_env.h"
 #include "config_options.h"
 
+#include <zmq.hpp>
+
 using hrc = std::chrono::high_resolution_clock;
 using ns = std::chrono::nanoseconds;
 using std::chrono::duration_cast;
@@ -22,24 +24,47 @@ using std::chrono::duration_cast;
 class FlushEventListener : public rocksdb::EventListener {
     void OnMemTableSealed(const rocksdb::MemTableInfo &mem_table_info) override {
         // LOG("memtable sealed time;" << duration_cast<ns>(hrc::now().time_since_epoch()).count() << " " << mem_table_info
-            // .
-            // num_entries);
+        // .
+        // num_entries);
     }
 };
 
 enum class DBOperation {
-    Insert,
+    Insert = 0,
     Update,
-    PointDelete,
-    RangeDelete,
     PointQuery,
     RangeQuery,
+    PointDelete,
+    RangeDelete,
 };
+
+std::ostream &operator<<(std::ostream &os, DBOperation op) {
+    switch (op) {
+        case DBOperation::Insert: os << "Insert";
+            break;
+        case DBOperation::Update: os << "Update";
+            break;
+        case DBOperation::PointDelete: os << "PointDelete";
+            break;
+        case DBOperation::RangeDelete: os << "RangeDelete";
+            break;
+        case DBOperation::PointQuery: os << "PointQuery";
+            break;
+        case DBOperation::RangeQuery: os << "RangeQuery";
+            break;
+    }
+    return os;
+}
+
 class SlidingWindow {
 public:
-    explicit SlidingWindow(const size_t size) : maxSize(size) {}
+    explicit SlidingWindow(const size_t size) : maxSize(size), op_count(0) {
+    }
 
     void add(const DBOperation item) {
+        this->mutex.lock();
+        ++this->op_count;
+
         if (window.size() == maxSize) {
             // Remove oldest item
             const DBOperation oldest = window.front();
@@ -51,49 +76,121 @@ public:
         }
         // Add new item
         window.push_back(item);
+        this->mutex.unlock();
         counts[item]++;
     }
-    std::string getCountsAsPercentages() const {
+
+    std::optional<std::string> getCountsAsPercentages() {
+        this->mutex.lock();
         const auto totalItems = static_cast<double>(window.size());
         if (totalItems == 0) {
-            return "No items in the window.";
+            this->mutex.unlock();
+            return std::nullopt;
         }
 
         std::stringstream ss;
         ss << std::fixed << std::setprecision(4); // Set precision for percentage
 
-        for (const auto& [category, count] : counts) {
+        for (const auto &[category, count]: counts) {
             const double percentage = static_cast<double>(count) / totalItems * 100.0;
-            ss << percentage << ",";
+            LOG(category << ":" << percentage);
+            ss << category << ":" << percentage << ",";
         }
-
+        this->mutex.unlock();
         return ss.str();
     }
 
+    size_t throughput() {
+        std::lock_guard lock(mutex);
+        const size_t ret = this->op_count;
+        this->op_count = 0;
+        return ret;
+    }
+
 private:
+    std::mutex mutex;
     std::deque<DBOperation> window;
     std::unordered_map<DBOperation, size_t> counts;
     size_t maxSize;
+
+    size_t op_count;
 };
 
-void memtable_decider(rocksdb::DB *db, const SlidingWindow& workload_stats) {
+// To start the deciding process, we send a syn and wait for an ack
+// We use a condvar to let the main thread "sleep" while
+// the decider thread waits for the ack from python.
+std::mutex start_flag_mutex;
+std::condition_variable start_cv;
+bool start_flag = false;
+// To shutdown the decider thread, we use an atomic bool that
+// gets checked in a while loop in the decider thread
+// and gets set to true when the workload is complete.
+std::atomic_bool stop_flag(false);
 
-  // zmq_context = zmq::context_t();
-  // zmq_socket = zmq::socket_t(zmq_context, zmq::socket_type::pair);
-  // zmq_socket.bind("ipc:///tmp/rocksdb-memtable-switching-ipc");
-    for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-        db->memtable_factory_mutex_.lock();
-        LOG((typeid(db->memtable_factory_.get()) == typeid(SkipListFactory) ? "true" : "false"));
-        if (typeid(*db->memtable_factory_) == typeid(SkipListFactory)) {
-            db->memtable_factory_ = std::make_shared<VectorRepFactory>();
-        } else {
-            db->memtable_factory_ = std::make_shared<SkipListFactory>();
-        }
-        LOG(db->memtable_factory_->Name());
-        db->memtable_factory_mutex_.unlock();
-        LOG(workload_stats.getCountsAsPercentages());
+void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
+    zmq::context_t zmq_context;
+    zmq::socket_t zmq_socket(zmq_context, zmq::socket_type::pair);
+    zmq_socket.bind("ipc:///tmp/rocksdb-memtable-switching-ipc");
+
+    // SYN ACK with decider
+    LOG("Sending syn");
+    std::string syn_str = "syn";
+    zmq::message_t syn_msg(syn_str.data(), syn_str.size());
+    zmq_socket.send(syn_msg, zmq::send_flags::none);
+    zmq::message_t ack_msg;
+    zmq_socket.recv(ack_msg, zmq::recv_flags::none);
+
+    {
+        std::lock_guard lock(start_flag_mutex);
+        start_flag = true;
     }
+    start_cv.notify_one();
+
+    while (!stop_flag.load(std::memory_order_relaxed)) {
+        LOG("DECIDER iteration");
+        std::this_thread::sleep_for(std::chrono::seconds(15));
+        std::optional<std::string> workload_str_opt = workload_stats.getCountsAsPercentages();
+        if (!workload_str_opt.has_value()) {
+            continue;
+        }
+
+        std::string workload_str = workload_str_opt.value();
+        zmq::message_t workload_msg(workload_str.data(), workload_str.size());
+        zmq_socket.send(workload_msg, zmq::send_flags::none);
+
+        std::string perf_metric_str(std::to_string(workload_stats.throughput()));
+        zmq::message_t perf_metric_msg(perf_metric_str.data(), perf_metric_str.size());
+        zmq_socket.send(perf_metric_msg, zmq::send_flags::none);
+
+        zmq::message_t memtable_msg;
+        auto n = zmq_socket.recv(memtable_msg, zmq::recv_flags::none);
+        if (!n.has_value()) {
+            LOG("error no bytes read");
+        }
+        std::string memtable_str(static_cast<char *>(memtable_msg.data()), memtable_msg.size());
+
+        db->memtable_factory_mutex_.lock();
+        if (memtable_str == "vector") {
+            db->memtable_factory_ = std::make_shared<VectorRepFactory>();
+        } else if (memtable_str == "skiplist") {
+            db->memtable_factory_ = std::make_shared<SkipListFactory>();
+        } else if (memtable_str == "hash-linklist") {
+            db->memtable_factory_.reset(NewHashLinkListRepFactory());
+        } else if (memtable_str == "hash-skiplist") {
+            db->memtable_factory_.reset(NewHashSkipListRepFactory());
+        } else {
+            LOG("ERROR: invalid memtable str: " << memtable_str);
+        }
+        // LOG(db->memtable_factory_->Name());
+        db->memtable_factory_mutex_.unlock();
+    }
+
+    LOG("Shutting down decider");
+    std::string shutdown_str = "shutdown";
+    zmq::message_t shutdown_msg(shutdown_str.data(), shutdown_str.size());
+    zmq_socket.send(shutdown_msg, zmq::send_flags::none);
+    zmq_socket.close();
+    LOG("sent shutdown signal");
 }
 
 int main(int argc, char *argv[]) {
@@ -135,7 +232,7 @@ int main(int argc, char *argv[]) {
     if (!s.ok())
         LOG(s.ToString());
 
-    SlidingWindow workload_stats(1000);
+    SlidingWindow workload_stats(100000);
 
     // std::string line;
     // while (std::getline(*input, line)) {
@@ -146,8 +243,7 @@ int main(int argc, char *argv[]) {
     //     std::cout << line << std::endl;
     // }
 
-    // found via looking at the "memtable seal time;" log
-    const auto TIMES = 145570;
+    const auto TIMES = 5000;
     LOG("Start inserts");
 
     db->memtable_factory_mutex_.lock();
@@ -155,19 +251,14 @@ int main(int argc, char *argv[]) {
     db->memtable_factory_mutex_.unlock();
     std::thread decider_thread([&db, &workload_stats] {
         memtable_decider(db, workload_stats);
-    });
-    decider_thread.detach();
+    }); {
+        LOG("waiting on decider thread");
+        std::unique_lock lock(start_flag_mutex);
+        start_cv.wait(lock, [] { return start_flag; });
+    }
 
-    // if (env->IsPerfIOStatEnabled()) {
-    //     SetPerfLevel(PerfLevel::kEnableTimeAndCPUTimeExceptForMutex);
-    //     get_perf_context()->Reset();
-    //     get_perf_context()->ClearPerLevelPerfContext();
-    //     get_perf_context()->EnablePerLevelPerfContext();
-    //     get_iostats_context()->Reset();
-    // }
-    for (int t = 0; t < 10; ++t) {
+    for (int t = 0; t < 5000; ++t) {
         LOG("===" << t << "===");
-        LOG("Insert start Time;" << duration_cast<ns>(hrc::now().time_since_epoch()).count());
         for (size_t i = 0; i < TIMES; ++i) {
             // if (i > 14500) db->memtable_impl = "vector";
             // if (i % 10 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -176,24 +267,21 @@ int main(int argc, char *argv[]) {
             db->Put(w_options, key.substr(0, 5), val.substr(0, 11));
             workload_stats.add(DBOperation::Insert);
         }
-        std::string val;
-        for (size_t i = 0; i < 1000; ++i) {
-            std::string key = "k" + std::to_string(i) + std::string(5, '0');
-            db->Get(r_options, key.substr(0, 5), &val);
-            workload_stats.add(DBOperation::PointQuery);
-        }
-        LOG("insert end Time;" << duration_cast<ns>(hrc::now().time_since_epoch()).count());
-        LOG("flush write bytes " << db->GetOptions().statistics->getTickerCount(FLUSH_WRITE_BYTES));
-        LOG("memtable bytes at flush " << db->GetOptions().statistics->getTickerCount(MEMTABLE_PAYLOAD_BYTES_AT_FLUSH));
+        // std::string val;
+        // for (size_t i = 0; i < TIMES / 10; ++i) {
+        //     std::string key = "k" + std::to_string(i) + std::string(5, '0');
+        //     db->Get(r_options, key.substr(0, 5), &val);
+        //     workload_stats.add(DBOperation::PointQuery);
+        // }
     }
-    // if (env->IsPerfIOStatEnabled()) {
-    //     rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
-    //     std::cout << "RocksDB Perf Context : " << std::endl;
-    //     std::cout << rocksdb::get_perf_context()->ToString() << std::endl;
-    //     std::cout << "RocksDB Iostats Context : " << std::endl;
-    //     std::cout << rocksdb::get_iostats_context()->ToString() << std::endl;
-    // }
+
+    LOG("Storing stop flag");
+    stop_flag.store(true, std::memory_order_relaxed);
+    LOG("joinging decider");
+    decider_thread.join();
+    LOG("joined decider, ending");
+
 
     delete db;
-    rocksdb::DestroyDB(db_path, options);
+    // rocksdb::DestroyDB(db_path, options);
 }

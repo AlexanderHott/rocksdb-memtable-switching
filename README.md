@@ -23,6 +23,7 @@ For running each individual project, check their README.
 - [ ] check for newer hyperparameter optimization library similar to optuna
 - [ ] hook up workload generator
 - [ ] make db_env / rocksdb options configurable via json
+- [ ] add SYN/ACK handshake so that the benchmark / decider program start only when both are ready
 
 ## Docs
 
