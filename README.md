@@ -69,3 +69,15 @@ handles the message sending and receiving logic.
 ```py
 initial_workload_str = self.zmq_socket.recv().decode("utf-8")
 ```
+
+vector
+```log
+ Time: 1418
+ Time: 1499
+ Time: 1501
+ Time: 1502
+ Time: 1418
+ Time: 1504
+ Time: 1505
+ Time: 1502
+```

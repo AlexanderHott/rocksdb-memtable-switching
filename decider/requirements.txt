@@ -13,3 +13,5 @@ pyzmq==26.0.3
 SQLAlchemy==2.0.31
 tqdm==4.66.4
 typing_extensions==4.12.2
+pandas
+matplotlib

@@ -42,3 +42,11 @@ Options:
   -h, --help                      Print help
 
 ```
+
+## TODO
+
+- change key types
+  - string, int
+- point queries based on existing or non existing keys
+- range delete impl
+- different distributions

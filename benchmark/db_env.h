@@ -7,7 +7,7 @@ namespace Default {
 
 const unsigned int ENTRY_SIZE = 16;
 const unsigned int ENTRIES_PER_PAGE = 1024;
-const unsigned int BUFFER_SIZE_IN_PAGES = 64;
+const unsigned int BUFFER_SIZE_IN_PAGES = 1024;
 
 const double SIZE_RATIO = 4;
 const unsigned int FILE_TO_MEMTABLE_SIZE_RATIO = 1;
@@ -150,6 +150,7 @@ class DBEnv {
   uint16_t compaction_pri = 1;  // [c] lower case
 
   /**
+   * WARNING: Not used
    * Memtable Factory
    * 1 for skiplist
    * 2 for vector
@@ -412,7 +413,7 @@ class DBEnv {
   // only used for hash based buffers
   // if prefix_length is zero, the
   // implementation fallback to skiplist
-  uint32_t prefix_length = 0;
+  uint32_t prefix_length = 4;
   size_t bucket_count = 50000;
 
   // refer memtable.h (NewHashSkipListRepFactory)

@@ -1,9 +1,10 @@
 import zmq
 import optuna
-from optuna import Trial
+from optuna.trial import Trial, FrozenTrial
 from zmq import Socket
 import logging
-from dataclasses import dataclass
+import pandas as pd
+from datetime import datetime
 
 
 class Workload:
@@ -29,7 +30,7 @@ class Workload:
         workload = Workload()
         for op_count in op_counts:
             op, count_str = op_count.split(":")
-            count = float(count_str)
+            count = round(float(count_str), 1)
             match op:
                 case "Insert":
                     workload.inserts = count
@@ -51,12 +52,12 @@ class Workload:
     def to_percentages(self) -> tuple[float, float, float, float, float, float]:
         total_ops = self.inserts + self.updates + self.point_queries + self.range_queries + self.point_deletes + self.range_deletes
         return (
-            self.inserts / total_ops,
-            self.updates / total_ops,
-            self.point_queries / total_ops,
-            self.range_queries / total_ops,
-            self.point_deletes / total_ops,
-            self.range_deletes / total_ops,
+            round(self.inserts / total_ops, 1),
+            round(self.updates / total_ops, 1),
+            round(self.point_queries / total_ops, 1),
+            round(self.range_queries / total_ops, 1),
+            round(self.point_deletes / total_ops, 1),
+            round(self.range_deletes / total_ops, 1),
         )
 
 
@@ -84,8 +85,15 @@ class Objective:
         self.perf_metric = float(perf_metric_str)
         logging.debug(f"perf metric: {self.perf_metric}")
 
-    def __call__(self, trial: Trial) -> float:
+    def __call__(self, trial: Trial) -> tuple[float, bool]:
         """Optimization function for optuna."""
+
+        # set the same min and max to force the optimizer to "choose" the current workload
+        # this is needed to let the optimizer know about the past workload without letting it dictate what it should be
+        (inserts_pct, updates_pct, point_queries_pct, range_queries_pct, point_deletes_pct, range_deletes_pct) \
+            = self.workload.to_percentages()
+        _insert = trial.suggest_float("inserts", inserts_pct, inserts_pct)
+        _point_query = trial.suggest_float("point_queries", point_queries_pct, point_queries_pct)
 
         memtable = trial.suggest_categorical('memtable', [
             "vector",
@@ -93,31 +101,27 @@ class Objective:
             "hash-linklist",
             "hash-skiplist"
         ])
-        # set the same min and max to force the optimizer to "choose" the current workload
-        # this is needed to let the optimizer know about the past workload without letting it dictate what it should be
-        (inserts_pct, updates_pct, point_queries_pct, range_queries_pct, point_deletes_pct, range_deletes_pct) \
-            = self.workload.to_percentages()
-        _insert = trial.suggest_float("inserts", inserts_pct, inserts_pct)
-        _point_query = trial.suggest_float("point_queries", point_queries_pct, point_queries_pct)
+
         logging.info(f"Suggesting {memtable=} ({_insert=}, {_point_query=})")
 
         # send suggested memtable to c++
-        self.zmq_socket.send_string("skiplist")
+        self.zmq_socket.send_string(memtable)
 
         workload_or_shutdown_str = self.zmq_socket.recv().decode("utf-8")
         if workload_or_shutdown_str == "shutdown":
             logging.info("shutting down")
-            exit(0)
+            return 0.0, True
         self.workload = Workload.from_str(workload_or_shutdown_str)
 
         perf_metric_str = self.zmq_socket.recv().decode("utf-8")
         self.perf_metric = float(perf_metric_str)
         logging.debug(f"perf metric: {self.perf_metric}")
 
-        return self.perf_metric
+        return self.perf_metric, False
 
 
 if __name__ == "__main__":
+
     logging.basicConfig(level=logging.DEBUG)
     ctx = zmq.Context()
     sock = ctx.socket(zmq.PAIR)
@@ -132,7 +136,41 @@ if __name__ == "__main__":
 
     objective = Objective(sock)
     study = optuna.create_study(direction="maximize")
-    while True:
+
+    df = pd.read_csv("./data.csv")
+    for i, (_, row) in enumerate(df.iterrows()):
+        trial = optuna.trial.FrozenTrial(
+            trial_id=i,
+            number=i,
+            value=row['value'],
+            params={
+                'inserts': row['params_inserts'],
+                'point_queries': row['params_point_queries'],
+                'memtable': row['params_memtable'],
+            },
+            distributions={
+                'inserts': optuna.distributions.FloatDistribution(0., 1.),
+                'point_queries': optuna.distributions.FloatDistribution(0., 1.),
+                'memtable': optuna.distributions.CategoricalDistribution([
+                    "vector",
+                    "skiplist",
+                    "hash-linklist",
+                    "hash-skiplist"
+                ])
+            },
+            user_attrs={},
+            system_attrs={},
+            intermediate_values={},
+            datetime_start=datetime.now(),
+            datetime_complete=datetime.now(),
+            state=optuna.trial.TrialState.COMPLETE,
+        )
+        study.add_trial(trial)
+
+    done = False
+    while not done:
         trial = study.ask()
-        ret = objective(trial)
+        ret, done = objective(trial)
         study.tell(trial, ret)
+
+    study.trials_dataframe().to_csv(f"{study.study_name}-results.csv")

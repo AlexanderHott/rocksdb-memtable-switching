@@ -23,9 +23,10 @@ using std::chrono::duration_cast;
 
 class FlushEventListener : public rocksdb::EventListener {
     void OnMemTableSealed(const rocksdb::MemTableInfo &mem_table_info) override {
-        // LOG("memtable sealed time;" << duration_cast<ns>(hrc::now().time_since_epoch()).count() << " " << mem_table_info
-        // .
-        // num_entries);
+        LOG("memtable sealed time;"
+            << duration_cast<ns>(hrc::now().time_since_epoch()).count()
+            << " "
+            << mem_table_info.num_entries);
     }
 };
 
@@ -138,9 +139,7 @@ void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
     zmq::message_t syn_msg(syn_str.data(), syn_str.size());
     zmq_socket.send(syn_msg, zmq::send_flags::none);
     zmq::message_t ack_msg;
-    zmq_socket.recv(ack_msg, zmq::recv_flags::none);
-
-    {
+    zmq_socket.recv(ack_msg, zmq::recv_flags::none); {
         std::lock_guard lock(start_flag_mutex);
         start_flag = true;
     }
@@ -148,7 +147,7 @@ void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
 
     while (!stop_flag.load(std::memory_order_relaxed)) {
         LOG("DECIDER iteration");
-        std::this_thread::sleep_for(std::chrono::seconds(15));
+        std::this_thread::sleep_for(std::chrono::seconds(30));
         std::optional<std::string> workload_str_opt = workload_stats.getCountsAsPercentages();
         if (!workload_str_opt.has_value()) {
             continue;
@@ -169,6 +168,7 @@ void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
         }
         std::string memtable_str(static_cast<char *>(memtable_msg.data()), memtable_msg.size());
 
+        LOG("Chose: " << memtable_str);
         db->memtable_factory_mutex_.lock();
         if (memtable_str == "vector") {
             db->memtable_factory_ = std::make_shared<VectorRepFactory>();
@@ -181,7 +181,7 @@ void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
         } else {
             LOG("ERROR: invalid memtable str: " << memtable_str);
         }
-        // LOG(db->memtable_factory_->Name());
+        LOG("[Decider] " << db->memtable_factory_->Name());
         db->memtable_factory_mutex_.unlock();
     }
 
@@ -194,22 +194,6 @@ void memtable_decider(rocksdb::DB *db, SlidingWindow &workload_stats) {
 }
 
 int main(int argc, char *argv[]) {
-    // std::istream* input;
-    // std::ifstream file;
-    //
-    // if (argc > 1) {
-    //     // Open the file passed as the first argument
-    //     file.open(argv[1]);
-    //     if (!file.is_open()) {
-    //         std::cerr << "Error: Could not open file " << argv[1] << std::endl;
-    //         return 1;
-    //     }
-    //     input = &file;
-    // } else {
-    //     // No file passed, use standard input
-    //     input = &std::cin;
-    // }
-
     DBEnv *env = DBEnv::GetInstance();
 
     DB *db;
@@ -223,6 +207,18 @@ int main(int argc, char *argv[]) {
                   &f_options);
 
     options.listeners.push_back(std::make_shared<FlushEventListener>());
+    // options.memtable_factory = std::make_shared<VectorRepFactory>(env->vector_preallocation_size_in_bytes);
+    // options.memtable_factory = std::make_shared<SkipListFactory>();
+    // options.memtable_factory.reset(NewHashLinkListRepFactory(
+    //     env->bucket_count, env->linklist_huge_page_tlb_size,
+    //     env->linklist_bucket_entries_logging_threshold,
+    //     env->linklist_if_log_bucket_dist_when_flash,
+    //     env->linklist_threshold_use_skiplist)
+    //     );
+    options.memtable_factory.reset(NewHashSkipListRepFactory());
+    options.prefix_extractor.reset(
+        NewFixedPrefixTransform(env->prefix_length));
+
     std::string db_path = "/tmp/rocksdb-memtable-switching";
 
     rocksdb::DestroyDB(db_path, options);
@@ -234,20 +230,9 @@ int main(int argc, char *argv[]) {
 
     SlidingWindow workload_stats(100000);
 
-    // std::string line;
-    // while (std::getline(*input, line)) {
-    //     switch (line[0]) {
-    //         case 'I':
-    //             break;
-    //     }
-    //     std::cout << line << std::endl;
-    // }
-
-    const auto TIMES = 5000;
-    LOG("Start inserts");
 
     db->memtable_factory_mutex_.lock();
-    db->memtable_factory_ = std::make_shared<SkipListFactory>();
+    db->memtable_factory_ = options.memtable_factory;
     db->memtable_factory_mutex_.unlock();
     std::thread decider_thread([&db, &workload_stats] {
         memtable_decider(db, workload_stats);
@@ -257,22 +242,68 @@ int main(int argc, char *argv[]) {
         start_cv.wait(lock, [] { return start_flag; });
     }
 
-    for (int t = 0; t < 5000; ++t) {
-        LOG("===" << t << "===");
-        for (size_t i = 0; i < TIMES; ++i) {
-            // if (i > 14500) db->memtable_impl = "vector";
-            // if (i % 10 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            std::string key = "k" + std::to_string(i) + std::string(5, '0');
-            std::string val = std::to_string(i) + std::string(5, '0') + std::string(10, 'v');
-            db->Put(w_options, key.substr(0, 5), val.substr(0, 11));
-            workload_stats.add(DBOperation::Insert);
+    for (auto path: {"1ki_1kpq.txt", "1m_i.txt"}) {
+        LOG("RUNNING WORKLOAD " << path);
+        for (int i = 0; i < 50; ++i) {
+            std::istream *input;
+            std::ifstream file;
+            file.open("../workload-gen/workloads/" + std::string(path));
+            input = &file;
+
+            std::string line;
+            while (std::getline(*input, line)) {
+                switch (line[0]) {
+                    case 'I': {
+                        size_t i_sp = line.find(' ', 2);
+                        db->Put(w_options, line.substr(2, i_sp - 2), line.substr(i_sp + 1));
+                        workload_stats.add(DBOperation::Insert);
+                        break;
+                    }
+                    case 'U': {
+                        size_t u_sp = line.find(' ', 2);
+                        db->Put(w_options, line.substr(2, u_sp - 2), line.substr(u_sp + 1));
+                        workload_stats.add(DBOperation::Update);
+                        break;
+                    }
+                    case 'P': {
+                        std::string val;
+                        db->Get(r_options, line.substr(2), &val);
+                        workload_stats.add(DBOperation::PointQuery);
+                        break;
+                    }
+                    case 'R': {
+                        // Range Query
+                        size_t rq_sp = line.find(' ', 2);
+                        rocksdb::Iterator *it = db->NewIterator(r_options);
+                        std::string rq_k_beg = line.substr(2, rq_sp - 2);
+                        std::string rq_k_end = line.substr(rq_sp + 1);
+                        for (
+                            it->Seek(rq_k_beg);
+                            it->Valid() && it->key().ToString() < rq_k_end;
+                            it->Next()
+                        ) {
+                            auto _ = it->value();
+                        }
+                        workload_stats.add(DBOperation::RangeQuery);
+                        break;
+                    }
+                    case 'D': {
+                        db->Delete(w_options, line.substr(2));
+                        workload_stats.add(DBOperation::PointDelete);
+                        break;
+                    }
+                    case 'X': {
+                        // Range Delete
+                        size_t rd_sp = line.find(' ', 2);
+                        db->DeleteRange(w_options, line.substr(2, rd_sp - 2), line.substr(rd_sp + 1));
+                        workload_stats.add(DBOperation::RangeDelete);
+                        break;
+                    }
+                    default:
+                        LOG("ERROR: unknown operation: " << line[0]);
+                }
+            }
         }
-        // std::string val;
-        // for (size_t i = 0; i < TIMES / 10; ++i) {
-        //     std::string key = "k" + std::to_string(i) + std::string(5, '0');
-        //     db->Get(r_options, key.substr(0, 5), &val);
-        //     workload_stats.add(DBOperation::PointQuery);
-        // }
     }
 
     LOG("Storing stop flag");

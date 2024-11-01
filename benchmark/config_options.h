@@ -347,5 +347,7 @@ void configOptions(DBEnv *env, Options *options,
 #pragma region[LSMMemoryBuffer]
   // nothing to configure
   // everything is handled by parse_arguments
+  options->prefix_extractor.reset(
+      NewFixedPrefixTransform(env->prefix_length));
 #pragma endregion  // [LSMMemoryBuffer]
 }

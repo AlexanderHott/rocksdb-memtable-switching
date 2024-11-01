@@ -74,7 +74,6 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
                 continue;
             }
             let contents = fs::read_to_string(path)?;
-            let workload = generate_workload(contents)?;
 
             let output_file = path
                 .file_stem()
@@ -91,11 +90,10 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
             let mut output_file_path = output_path.clone();
             output_file_path.push(output_file);
 
-            fs::write(&output_file_path, workload)?;
+            generate_workload(contents, output_file_path.into())?;
         }
     } else if workload_path.is_file() {
         let contents = fs::read_to_string(&workload_path)?;
-        let workload = generate_workload(contents)?;
 
         let output_file = workload_path
             .file_stem()
@@ -106,7 +104,7 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
         let mut output_file_path = output_path.clone();
         output_file_path.push(output_file);
 
-        fs::write(&output_file_path, workload)?;
+       generate_workload(contents, output_file_path.into())?;
     } else {
         unreachable!("Path is neither a file nor a directory");
     };
