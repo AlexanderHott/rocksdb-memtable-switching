@@ -1,4 +1,4 @@
 [submodule "rocksdb"]
 	path = rocksdb
-	url = https://github.com/AlexanderHott/rocksdb.git
+	url = git@github.com:AlexanderHott/rocksdb.git
 	branch = feat/memtable-switching
