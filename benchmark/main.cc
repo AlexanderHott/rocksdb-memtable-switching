@@ -8,11 +8,10 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
-
 #include "db_env.h"
 #include "config_options.h"
-
 #include <zmq.hpp>
+#include <filesystem>  
 
 using hrc = std::chrono::high_resolution_clock;
 using ns = std::chrono::nanoseconds;
@@ -242,65 +241,137 @@ int main(int argc, char *argv[]) {
         start_cv.wait(lock, [] { return start_flag; });
     }
 
-    for (auto path: {"1ki_1kpq.txt", "1m_i.txt"}) {
-        LOG("RUNNING WORKLOAD " << path);
-        for (int i = 0; i < 50; ++i) {
-            std::istream *input;
-            std::ifstream file;
-            file.open("../workload-gen/workloads/" + std::string(path));
-            input = &file;
+    // for (auto path: {"1ki_1kpq.txt", "1m_i.txt"}) {
+    //     LOG("RUNNING WORKLOAD " << path);
+    //     for (int i = 0; i < 50; ++i) {
+    //         std::istream *input;
+    //         std::ifstream file;
+    //         file.open("../workload-gen/workloads/" + std::string(path));
+    //         input = &file;
 
-            std::string line;
-            while (std::getline(*input, line)) {
-                switch (line[0]) {
-                    case 'I': {
-                        size_t i_sp = line.find(' ', 2);
-                        db->Put(w_options, line.substr(2, i_sp - 2), line.substr(i_sp + 1));
-                        workload_stats.add(DBOperation::Insert);
-                        break;
-                    }
-                    case 'U': {
-                        size_t u_sp = line.find(' ', 2);
-                        db->Put(w_options, line.substr(2, u_sp - 2), line.substr(u_sp + 1));
-                        workload_stats.add(DBOperation::Update);
-                        break;
-                    }
-                    case 'P': {
-                        std::string val;
-                        db->Get(r_options, line.substr(2), &val);
-                        workload_stats.add(DBOperation::PointQuery);
-                        break;
-                    }
-                    case 'R': {
-                        // Range Query
-                        size_t rq_sp = line.find(' ', 2);
-                        rocksdb::Iterator *it = db->NewIterator(r_options);
-                        std::string rq_k_beg = line.substr(2, rq_sp - 2);
-                        std::string rq_k_end = line.substr(rq_sp + 1);
-                        for (
-                            it->Seek(rq_k_beg);
-                            it->Valid() && it->key().ToString() < rq_k_end;
-                            it->Next()
-                        ) {
-                            auto _ = it->value();
+    //         std::string line;
+    //         while (std::getline(*input, line)) {
+    //             switch (line[0]) {
+    //                 case 'I': {
+    //                     size_t i_sp = line.find(' ', 2);
+    //                     db->Put(w_options, line.substr(2, i_sp - 2), line.substr(i_sp + 1));
+    //                     workload_stats.add(DBOperation::Insert);
+    //                     break;
+    //                 }
+    //                 case 'U': {
+    //                     size_t u_sp = line.find(' ', 2);
+    //                     db->Put(w_options, line.substr(2, u_sp - 2), line.substr(u_sp + 1));
+    //                     workload_stats.add(DBOperation::Update);
+    //                     break;
+    //                 }
+    //                 case 'P': {
+    //                     std::string val;
+    //                     db->Get(r_options, line.substr(2), &val);
+    //                     workload_stats.add(DBOperation::PointQuery);
+    //                     break;
+    //                 }
+    //                 case 'R': {
+    //                     // Range Query
+    //                     size_t rq_sp = line.find(' ', 2);
+    //                     rocksdb::Iterator *it = db->NewIterator(r_options);
+    //                     std::string rq_k_beg = line.substr(2, rq_sp - 2);
+    //                     std::string rq_k_end = line.substr(rq_sp + 1);
+    //                     for (
+    //                         it->Seek(rq_k_beg);
+    //                         it->Valid() && it->key().ToString() < rq_k_end;
+    //                         it->Next()
+    //                     ) {
+    //                         auto _ = it->value();
+    //                     }
+    //                     workload_stats.add(DBOperation::RangeQuery);
+    //                     break;
+    //                 }
+    //                 case 'D': {
+    //                     db->Delete(w_options, line.substr(2));
+    //                     workload_stats.add(DBOperation::PointDelete);
+    //                     break;
+    //                 }
+    //                 case 'X': {
+    //                     // Range Delete
+    //                     size_t rd_sp = line.find(' ', 2);
+    //                     db->DeleteRange(w_options, line.substr(2, rd_sp - 2), line.substr(rd_sp + 1));
+    //                     workload_stats.add(DBOperation::RangeDelete);
+    //                     break;
+    //                 }
+    //                 default:
+    //                     LOG("ERROR: unknown operation: " << line[0]);
+    //             }
+    //         }
+    //     }
+    // }
+
+    // iterate through all workload files in the directory rather than hardcode file name
+    namespace fs = std::filesystem;
+    std::string workload_dir = "../workload-gen/workloads";
+
+    for (const auto& entry : fs::directory_iterator(workload_dir)) {
+        if (entry.is_regular_file()) {
+            std::string path = entry.path().string();
+            LOG("RUNNING WORKLOAD " << path);
+
+            for (int i = 0; i < 50; ++i) {
+                std::istream *input;
+                std::ifstream file;
+                file.open(path);
+                if (!file.is_open()) {
+                    LOG("ERROR: Could not open file " << path);
+                    continue;
+                }
+                input = &file;
+
+                std::string line;
+                while (std::getline(*input, line)) {
+                    switch (line[0]) {
+                        case 'I': {
+                            size_t i_sp = line.find(' ', 2);
+                            db->Put(w_options, line.substr(2, i_sp - 2), line.substr(i_sp + 1));
+                            workload_stats.add(DBOperation::Insert);
+                            break;
                         }
-                        workload_stats.add(DBOperation::RangeQuery);
-                        break;
+                        case 'U': {
+                            size_t u_sp = line.find(' ', 2);
+                            db->Put(w_options, line.substr(2, u_sp - 2), line.substr(u_sp + 1));
+                            workload_stats.add(DBOperation::Update);
+                            break;
+                        }
+                        case 'P': {
+                            std::string val;
+                            db->Get(r_options, line.substr(2), &val);
+                            workload_stats.add(DBOperation::PointQuery);
+                            break;
+                        }
+                        case 'R': {
+                            // Range Query
+                            size_t rq_sp = line.find(' ', 2);
+                            rocksdb::Iterator *it = db->NewIterator(r_options);
+                            std::string rq_k_beg = line.substr(2, rq_sp - 2);
+                            std::string rq_k_end = line.substr(rq_sp + 1);
+                            for (it->Seek(rq_k_beg); it->Valid() && it->key().ToString() < rq_k_end; it->Next()) {
+                                auto _ = it->value();
+                            }
+                            workload_stats.add(DBOperation::RangeQuery);
+                            break;
+                        }
+                        case 'D': {
+                            db->Delete(w_options, line.substr(2));
+                            workload_stats.add(DBOperation::PointDelete);
+                            break;
+                        }
+                        case 'X': {
+                            // Range Delete
+                            size_t rd_sp = line.find(' ', 2);
+                            db->DeleteRange(w_options, line.substr(2, rd_sp - 2), line.substr(rd_sp + 1));
+                            workload_stats.add(DBOperation::RangeDelete);
+                            break;
+                        }
+                        default:
+                            LOG("ERROR: unknown operation: " << line[0]);
                     }
-                    case 'D': {
-                        db->Delete(w_options, line.substr(2));
-                        workload_stats.add(DBOperation::PointDelete);
-                        break;
-                    }
-                    case 'X': {
-                        // Range Delete
-                        size_t rd_sp = line.find(' ', 2);
-                        db->DeleteRange(w_options, line.substr(2, rd_sp - 2), line.substr(rd_sp + 1));
-                        workload_stats.add(DBOperation::RangeDelete);
-                        break;
-                    }
-                    default:
-                        LOG("ERROR: unknown operation: " << line[0]);
                 }
             }
         }
