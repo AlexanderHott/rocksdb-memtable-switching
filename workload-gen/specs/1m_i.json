@@ -3,7 +3,7 @@
     "sections": [
         {
             "inserts": {
-                "amount": 1000000,
+                "amount": 10000,
                 "key_len": 8,
                 "val_len": 24
             }

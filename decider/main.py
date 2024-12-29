@@ -5,6 +5,8 @@ from zmq import Socket
 import logging
 import pandas as pd
 from datetime import datetime
+import optuna.visualization as vis
+
 
 
 class Mission:
@@ -209,3 +211,5 @@ if __name__ == "__main__":
 
     output.close()
     study.trials_dataframe().to_csv(f"{study.study_name}-results.csv")
+
+
