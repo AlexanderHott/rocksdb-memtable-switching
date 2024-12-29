@@ -81,3 +81,33 @@ vector
  Time: 1505
  Time: 1502
 ```
+
+---
+
+# Project Goals
+
+- [ ] graphs for different vector implementations
+- [ ] improve stats collector
+    - [ ] add latency metric to optimize off of
+    - [ ] add rq,selectivity,d,rd
+- [ ] make memtable switching based off of # operations
+- [ ] handle reads on vector memtable
+- [ ] add table size in optimizer
+---
+
+- reasonably large data
+- all operation types
+- in memory vs in disk queries
+- 
+        
+---
+
+- collect stats on every operation to plot
+
+- collect stats for current memtable for decider
+- send memtable stats to decider
+- request memtable from decider when a new one is being constructed
+
+1. wait for 50000 operations
+2. when memtable flush
+3. ask python for next memtable

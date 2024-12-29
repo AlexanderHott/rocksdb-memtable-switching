@@ -5,7 +5,7 @@
             "inserts": {
                 "amount": 1000000,
                 "key_len": 8,
-                "val_len": 8
+                "val_len": 24
             }
         }
     ]

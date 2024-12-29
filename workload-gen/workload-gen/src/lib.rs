@@ -1,12 +1,15 @@
 #![allow(clippy::needless_return)]
 use anyhow::{Context, Result};
+use rand::distributions::Alphanumeric;
 use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::thread::spawn;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
 /// Workload specification.
 mod spec {
@@ -24,9 +27,9 @@ mod spec {
         /// Number of inserts in the section
         pub(crate) amount: usize,
         /// Key length
-        key_len: usize,
+        pub(crate) key_len: usize,
         /// Value length
-        val_len: usize,
+        pub(crate) val_len: usize,
     }
 
     impl Inserts {
@@ -34,7 +37,10 @@ mod spec {
             let mut key = String::with_capacity(self.key_len);
             let mut val = String::with_capacity(self.val_len);
             (0..self.amount)
-                .map(|_| {
+                .map(|i| {
+                    if i % 1000 == 0 {
+                        println!("Generating insert {}", i);
+                    }
                     key.clear();
                     key.extend(
                         rng.sample_iter(&Alphanumeric)
@@ -122,7 +128,10 @@ mod spec {
             rng: &mut ThreadRng,
         ) -> Vec<Operation> {
             (0..self.amount)
-                .map(|_| {
+                .map(|i| {
+                    if i % 1000 == 0 {
+                        println!("Generating point query {}", i);
+                    }
                     let random_idx = rng.gen_range(0..valid_keys.len());
                     let key = valid_keys
                         .iter()
@@ -168,7 +177,7 @@ mod spec {
 
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub(crate) struct WorkloadSpecSection {
-        pub(crate) inserts: Option<Inserts>,
+        pub(crate) inserts: Inserts,
         pub(crate) updates: Option<Updates>,
         pub(crate) deletes: Option<Deletes>,
         pub(crate) point_queries: Option<PointQueries>,
@@ -177,7 +186,7 @@ mod spec {
 
     impl WorkloadSpecSection {
         pub fn operation_count(&self) -> usize {
-            let operation_count = self.inserts.map_or(0, |is| is.amount)
+            let operation_count = self.inserts.amount
                 + self.updates.map_or(0, |us| us.amount)
                 + self.point_queries.map_or(0, |is| is.amount)
                 + self.range_queries.map_or(0, |is| is.amount)
@@ -193,10 +202,7 @@ mod spec {
 
     impl WorkloadSpec {
         pub fn operation_count(&self) -> usize {
-            return self
-                .sections
-                .iter()
-                .fold(0, |acc, sec| acc + sec.operation_count());
+            return self.sections.iter().map(|s| s.operation_count()).sum();
         }
     }
 
@@ -204,7 +210,6 @@ mod spec {
         Insert(String, String),
         Update(String, String),
         Delete(String),
-        RangeDelete(String, String),
         PointQuery(String),
         RangeQuery(String, String),
     }
@@ -215,7 +220,7 @@ mod spec {
                 Operation::Insert(k, v) => format!("I {k} {v}"),
                 Operation::Update(k, v) => format!("U {k} {v}"),
                 Operation::Delete(k) => format!("D {k}"),
-                Operation::RangeDelete(ks, ke) => format!("X {ks} {ke}"),
+                // Operation::RangeDelete(ks, ke) => format!("X {ks} {ke}"),
                 Operation::PointQuery(k) => format!("P {k}"),
                 Operation::RangeQuery(ks, ke) => format!("R {ks} {ke}"),
             }
@@ -235,6 +240,93 @@ mod schema {
 
 pub use schema::generate_workload_spec_schema;
 use spec::*;
+
+#[derive(Debug, Copy, Clone, Eq, Ord, PartialOrd, PartialEq)]
+enum OpMarker {
+    Insert,
+    Update,
+    Delete,
+    PointQuery,
+    RangeQuery,
+}
+
+fn generate_operations2(workload: WorkloadSpec) -> Vec<Operation> {
+    let mut all_operations: Vec<Operation> = Vec::with_capacity(workload.operation_count());
+    // let mut rng = rand::thread_rng();
+    let mut rng = Xoshiro256PlusPlus::from_entropy();
+
+    for workload_section in workload.sections {
+        let mut markers: Vec<OpMarker> = Vec::with_capacity(workload_section.operation_count());
+        let mut operations: Vec<Operation> = Vec::with_capacity(workload_section.operation_count());
+        let is = workload_section.inserts;
+        let mut valid_keys: Vec<String> = Vec::with_capacity(is.amount);
+
+        markers.append(&mut vec![OpMarker::Insert; is.amount - 1]);
+        if let Some(pqs) = workload_section.point_queries {
+            markers.append(&mut vec![OpMarker::PointQuery; pqs.amount]);
+        }
+        let rng_ref = &mut rng;
+        markers.shuffle(rng_ref);
+
+        // push the first insert
+        {
+            let mut key = String::with_capacity(is.key_len);
+            key.extend(
+                rng_ref
+                    .sample_iter(&Alphanumeric)
+                    .take(is.key_len)
+                    .map(char::from),
+            );
+            let mut val = String::with_capacity(is.val_len);
+            val.extend(
+                rng_ref
+                    .sample_iter(&Alphanumeric)
+                    .take(is.key_len)
+                    .map(char::from),
+            );
+            operations.push(Operation::Insert(key.clone(), val));
+            valid_keys.push(key);
+        }
+        for (i, marker) in markers.iter().enumerate() {
+            if i % 5000 == 0 {
+                println!("Generating operation {}", i);
+            }
+            match marker {
+                OpMarker::Insert => {
+                    let mut key = String::with_capacity(is.key_len);
+                    key.extend(
+                        rng_ref
+                            .sample_iter(&Alphanumeric)
+                            .take(is.key_len)
+                            .map(char::from),
+                    );
+                    let mut val = String::with_capacity(is.val_len);
+                    val.extend(
+                        rng_ref
+                            .sample_iter(&Alphanumeric)
+                            .take(is.key_len)
+                            .map(char::from),
+                    );
+                    operations.push(Operation::Insert(key.clone(), val));
+                    valid_keys.push(key);
+                }
+                OpMarker::PointQuery => {
+                    let key = valid_keys
+                        .iter()
+                        .nth(rng_ref.gen_range(0..valid_keys.len()))
+                        .unwrap();
+                    operations.push(Operation::PointQuery(key.clone()));
+                }
+                _ => {}
+            }
+        }
+
+        all_operations.append(&mut operations);
+    }
+
+    return all_operations;
+}
+
 fn generate_operations(workload: WorkloadSpec) -> Vec<Operation> {
     let mut all_operations: Vec<Operation> = Vec::with_capacity(workload.operation_count());
     let mut rng = rand::thread_rng();
@@ -244,7 +336,8 @@ fn generate_operations(workload: WorkloadSpec) -> Vec<Operation> {
         let mut valid_keys: HashSet<String> = HashSet::new();
 
         // inserts
-        if let Some(is) = workload_section.inserts {
+        {
+            let is = workload_section.inserts;
             let insert_operations = is.generate_operations(&mut rng);
             let keys = insert_operations
                 .iter()
@@ -302,212 +395,12 @@ fn generate_operations(workload: WorkloadSpec) -> Vec<Operation> {
 pub fn generate_workload(workload_spec_string: String, output_file: PathBuf) -> Result<()> {
     let workload_spec: WorkloadSpec =
         serde_json::from_str(&workload_spec_string).context("parsing json file")?;
-    let operations = generate_operations(workload_spec);
+    let operations = generate_operations2(workload_spec);
 
-    let mut buf_writer = std::io::BufWriter::new(std::fs::File::create(output_file)?);
+    let mut buf_writer = BufWriter::new(File::create(output_file)?);
     operations.iter().for_each(|op| {
         writeln!(buf_writer, "{}", op.to_str()).unwrap();
     });
 
     Ok(())
-}
-
-mod empty {
-    use crate::spec::WorkloadSpec;
-    use anyhow::Result;
-    use rand::prelude::SliceRandom;
-    use rand::Rng;
-    use std::mem::MaybeUninit;
-    use std::sync::Arc;
-
-    #[derive(Copy, Clone)]
-    pub enum Op {
-        Insert,
-        Update,
-        Delete,
-        PointQuery,
-        RangeQuery,
-    }
-
-    pub(crate) fn generate_empty_operations(workload_spec: WorkloadSpec) -> Result<Vec<Op>> {
-        let mut operations = Vec::with_capacity(workload_spec.operation_count());
-        let max_operations = workload_spec
-            .sections
-            .iter()
-            .map(|s| s.operation_count())
-            .max()
-            .unwrap_or(0);
-        let mut section_operations = Vec::with_capacity(max_operations);
-        for section in workload_spec.sections {
-            section_operations.clear();
-            if let Some(i) = section.inserts {
-                let operation = vec![Op::Insert; i.amount];
-                section_operations.extend(operation);
-            }
-
-            section_operations.shuffle(&mut rand::thread_rng());
-            operations.extend(&section_operations);
-        }
-
-        Ok(operations)
-    }
-
-    pub(crate) fn generate_batch<'a>(ops: &'a [Op]) -> [String; BATCH_SIZE] {
-        let mut rng = rand::thread_rng();
-
-        let mut batch: [MaybeUninit<String>; BATCH_SIZE] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-
-        for i in 0..BATCH_SIZE {
-            batch[i] = MaybeUninit::new(format!("Random line: {}\n", rng.gen::<u64>()));
-        }
-
-        // SAFETY: All slice positions were initialized, so we can safely cast
-        unsafe { std::mem::transmute::<_, [String; BATCH_SIZE]>(batch) }
-    }
-
-    pub const BATCH_SIZE: usize = 1000;
-}
-
-use empty::{generate_batch, generate_empty_operations, BATCH_SIZE};
-pub fn generate_workload2(workload_spec_string: String) -> Result<()> {
-    let workload_spec: WorkloadSpec =
-        serde_json::from_str(&workload_spec_string).context("parsing json file")?;
-
-    let empty_operations = generate_empty_operations(workload_spec)?;
-    let empty_operations = Arc::new(empty_operations);
-
-    let NUM_LINES: usize = empty_operations.len();
-    const NUM_WORKERS: usize = 4;
-    assert_eq!(NUM_LINES % BATCH_SIZE, 0);
-
-    let (tx, rx) = mpsc::channel::<Arc<[String; BATCH_SIZE]>>();
-    let tx = Arc::new(tx);
-
-    let writer_handle = spawn(move || {
-        let file = File::create("output.txt").expect("Unable to create file");
-        let mut writer = BufWriter::new(file);
-        for batch in rx {
-            for line in batch.iter() {
-                writer
-                    .write_all(line.as_bytes())
-                    .expect("Unable to write data");
-            }
-        }
-    });
-
-    let chunk_size = NUM_LINES / NUM_WORKERS;
-    let mut handles = Vec::new();
-
-    // Split the operations into chunks manually
-    for i in 0..NUM_WORKERS {
-        let tx = Arc::clone(&tx);
-        let operations_chunk = Arc::clone(&empty_operations);
-
-        let start_index = i * chunk_size;
-        let end_index = if i == NUM_WORKERS - 1 {
-            NUM_LINES
-        } else {
-            (i + 1) * chunk_size
-        };
-
-        let handle = spawn(move || {
-            let chunk = &operations_chunk[start_index..end_index];
-            for chunk in chunk.chunks_exact(BATCH_SIZE) {
-                let batch = Arc::new(generate_batch(chunk));
-                tx.send(batch).unwrap()
-            }
-        });
-        handles.push(handle);
-    }
-    for handle in handles {
-        handle.join().expect("Worker thread panicked");
-    }
-
-    drop(tx); // Close the channel
-
-    // Wait for the writer thread to finish
-    writer_handle.join().expect("Writer thread panicked");
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    // #[test]
-    // fn test_from_string() {
-    //     let workload = generate_workload(
-    //         r#"{"sections":[{"inserts":{"amount":1,"key_len":1,"val_len":1}}]}"#.into(),
-    //     );
-    //     assert!(workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_empty_file() {
-    //     let schema = "";
-    //     let workload = generate_workload(schema.into());
-    //     assert!(!workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_empty_schema() {
-    //     let schema = include_str!("../test_specs/empty.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_simple_schema() {
-    //     let schema = include_str!("../test_specs/simple.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_complex_schema() {
-    //     let schema = include_str!("../test_specs/complex.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_large_schema() {
-    //     let schema = include_str!("../test_specs/large.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_missing_properties() {
-    //     let schema = include_str!("../test_specs/missing_properties.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(!workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_wrong_types() {
-    //     let schema = include_str!("../test_specs/wrong_types.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(!workload.is_ok());
-    // }
-    //
-    // #[test]
-    // fn test_invalid_values() {
-    //     let schema = include_str!("../test_specs/invalid_values.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(!workload.is_ok());
-    // }
-
-    #[test]
-    fn schema_generation_works() {
-        let workload = generate_workload_spec_schema();
-        assert!(workload.is_ok());
-    }
-    // #[test]
-    // fn test_1m_i() {
-    //     let schema = include_str!("../test_specs/1m_i.json");
-    //     let workload = generate_workload(schema.into());
-    //     assert!(workload.is_ok());
-    // }
 }
