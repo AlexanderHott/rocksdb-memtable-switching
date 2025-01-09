@@ -1,0 +1,9 @@
+{
+  "opts": {
+    "create_if_missing": true,
+    "memtable_factory": "HashSkipListRepFactory",
+    "allow_concurrent_memtable_write": false,
+    "write_buffer_size": 16777216,
+    "dynamic_memtable": true
+  }
+}

@@ -24,7 +24,7 @@ enum Command {
         #[arg(short = 'o', long = "output")]
         output: Option<String>,
     },
-    /// Prints the json schmea for IDE integration.
+    /// Prints the json schema for IDE integration.
     Schema,
 }
 
@@ -67,18 +67,24 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
             .follow_links(true)
             .into_iter()
             .filter_map(|e| e.ok())
+            .filter(|file| {
+                file.file_type().is_file()
+                    && file
+                        .path()
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.ends_with(".spec.json"))
+                        .unwrap_or(false)
+            })
         {
             let path = entry.path();
             println!("Generating workload for: {}", path.display());
-            if path.is_dir() {
-                continue;
-            }
             let contents = fs::read_to_string(path)?;
 
-            let output_file = path
-                .file_stem()
+            let output_file = path.file_name()
                 .and_then(|stem| stem.to_str())
-                .map(|stem| format!("{}.txt", stem))
+                .map(|stem| stem.rsplitn(3, '.').collect::<Vec<_>>()[2]) // file.spec.json -> file
+                .map(|stem| format!("{}.txt", stem)) // file -> file.txt
                 .unwrap_or_else(|| {
                     let filename = path.file_name().unwrap().to_string_lossy();
                     let basename = filename
@@ -104,7 +110,7 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
         let mut output_file_path = output_path.clone();
         output_file_path.push(output_file);
 
-       generate_workload(contents, output_file_path.into())?;
+        generate_workload(contents, output_file_path.into())?;
     } else {
         unreachable!("Path is neither a file nor a directory");
     };

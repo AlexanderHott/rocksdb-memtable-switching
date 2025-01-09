@@ -1,18 +1,27 @@
 ## Usage
 
+### Setup
+
 ```bash
-# run once
 sudo apt install cppzmq-dev
+
 mkdir cmake-build-debug
 cd cmake-build-debug
 cmake ..
 cd ..
 
-# build
-cmake --build ./cmake-build-debug --target main
-# run
-./cmake-build-debug/main
+mkdir cmake-build-release
+cd cmake-build-release
+cmake ..
+cd ..
+```
 
-# build and run
-cmake --build ./cmake-build-debug --target main && ./cmake-build-debug/main
+### Release Build
+```bash
+cmake --build ./cmake-build-release --target main -DCMAKE_BUILD_TYPE=Release && ./cmake-build-debug/main
+```
+
+### Debug Build
+```bash
+cmake --build ./cmake-build-debug --target main -DCMAKE_BUILD_TYPE=Debug && ./cmake-build-debug/main
 ```

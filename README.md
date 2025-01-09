@@ -14,16 +14,9 @@ git clone git@github.com:AlexanderHott/rocksdb-memtable-switching.git --recurse-
 
 For running each individual project, check their README.
 
-1. Generate a workload with `workload-gen-cli`
-2. Run the python decider script
-3. Run the rocksdb benchmarking program with the generated workload
-
-## TODO
-
-- [ ] check for newer hyperparameter optimization library similar to optuna
-- [ ] hook up workload generator
-- [ ] make db_env / rocksdb options configurable via json
-- [ ] add SYN/ACK handshake so that the benchmark / decider program start only when both are ready
+1. Generate a workload with `workload-gen`
+2. Run the python `decider` program
+3. Run the rocksdb `benchmark`ing program with the generated workload
 
 ## Docs
 
@@ -57,57 +50,9 @@ _point_query = trial.suggest_float("point_queries", point_queries_pct, point_que
 Optuna was the only library that I found that was able to change the bounds of the space on a per-run basis. I could 
 have written the optimization algorithm from scratch, but that is not the focus of this paper.
 
-TODO: Optimization loop visualization
-
 ---
 
 Since rocksdb is not written in python, I need a way for c++ and python to communicate. I thought of using files, shared 
 memory, or FFI, but all of those require significant implementation for creating a communication channel. I decided to 
 use the zmq family of libraries. For the "ipc" option, the use unix domain sockets (or named pipes on windows). It also
 handles the message sending and receiving logic.
-
-```py
-initial_workload_str = self.zmq_socket.recv().decode("utf-8")
-```
-
-vector
-```log
- Time: 1418
- Time: 1499
- Time: 1501
- Time: 1502
- Time: 1418
- Time: 1504
- Time: 1505
- Time: 1502
-```
-
----
-
-# Project Goals
-
-- [ ] graphs for different vector implementations
-- [ ] improve stats collector
-    - [ ] add latency metric to optimize off of
-    - [ ] add rq,selectivity,d,rd
-- [ ] make memtable switching based off of # operations
-- [ ] handle reads on vector memtable
-- [ ] add table size in optimizer
----
-
-- reasonably large data
-- all operation types
-- in memory vs in disk queries
-- 
-        
----
-
-- collect stats on every operation to plot
-
-- collect stats for current memtable for decider
-- send memtable stats to decider
-- request memtable from decider when a new one is being constructed
-
-1. wait for 50000 operations
-2. when memtable flush
-3. ask python for next memtable
