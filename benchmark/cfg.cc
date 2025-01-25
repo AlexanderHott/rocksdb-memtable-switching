@@ -10,17 +10,17 @@
 std::cout << __FILE__ << "(" << __LINE__ << "): " << msg << std::endl
 
 namespace cfg {
-    using json = nlohmann::json;
+    using jsonns = nlohmann::json;
 
-    void to_json(json &j, const CfgOpts &o) {
-        j = json{{"create_if_missing", o.create_if_missing}};
-        j = json{{"allow_concurrent_memtable_write", o.allow_concurrent_memtable_write}};
-        j = json{{"memtable_factory", o.memtable_factory}};
-        j = json{{"write_buffer_size", o.write_buffer_size}};
-        j = json{{"dynamic_memtable", o.dynamic_memtable}};
+    void to_json(jsonns &j, const CfgOpts &o) {
+        j = jsonns{{"create_if_missing", o.create_if_missing}};
+        j = jsonns{{"allow_concurrent_memtable_write", o.allow_concurrent_memtable_write}};
+        j = jsonns{{"memtable_factory", o.memtable_factory}};
+        j = jsonns{{"write_buffer_size", o.write_buffer_size}};
+        j = jsonns{{"dynamic_memtable", o.dynamic_memtable}};
     }
 
-    void from_json(const json &j, CfgOpts &o) {
+    void from_json(const jsonns &j, CfgOpts &o) {
         j.at("create_if_missing").get_to(o.create_if_missing);
         j.at("allow_concurrent_memtable_write").get_to(o.allow_concurrent_memtable_write);
         j.at("memtable_factory").get_to(o.memtable_factory);
@@ -28,11 +28,11 @@ namespace cfg {
         j.at("dynamic_memtable").get_to(o.dynamic_memtable);
     }
 
-    void to_json(json &j, const Cfg &c) {
-        j = json{{"opts", c.opts}};
+    void to_json(jsonns &j, const Cfg &c) {
+        j = jsonns{{"opts", c.opts}};
     }
 
-    void from_json(const json &j, Cfg &c) {
+    void from_json(const jsonns &j, Cfg &c) {
         j.at("opts").get_to(c.opts);
     }
 
@@ -49,7 +49,7 @@ namespace cfg {
         return cfg.into_rocksdb();
     }
 
-    std::optional<json> Cfg::read_json(const std::string &filename) {
+    std::optional<jsonns> Cfg::read_json(const std::string &filename) {
         std::ifstream file(filename);
         if (!file.is_open()) {
             std::cerr << "Could not open file: " << filename << std::endl;
@@ -57,10 +57,10 @@ namespace cfg {
         }
 
         try {
-            json jsonData;
+            jsonns jsonData;
             file >> jsonData;
             return jsonData;
-        } catch (const json::parse_error &e) {
+        } catch (const jsonns::parse_error &e) {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
             return std::nullopt;
         }

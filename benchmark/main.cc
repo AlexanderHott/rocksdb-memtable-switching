@@ -9,7 +9,7 @@
 using hrc = std::chrono::high_resolution_clock;
 using ns = std::chrono::nanoseconds;
 using std::chrono::duration_cast;
-using json = nlohmann::json;
+using jsonns = nlohmann::json;
 namespace fs = std::filesystem;
 
 using OpType = rocksdb::StatsCollector::OpType;
@@ -92,7 +92,8 @@ void benchmark(const std::string &config_path, const std::string &workload_path,
         db->zmq_socket_->send(msg, zmq::send_flags::none);
     }
 
-
+    LOG(opts.write_buffer_size);
+    
     LOG("running workload " << workload_path << " with config " << config_path);
     std::istream *input;
     std::ifstream file;
