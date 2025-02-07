@@ -2,9 +2,12 @@
 name = "workload-gen-cli"
 version = "0.1.0"
 edition = "2021"
+default-run = "workload-gen-cli"
 
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.9", features = ["derive"] }
+rayon = "1.10.0"
 walkdir = "2.5.0"
 workload-gen = { path = "../workload-gen/" }
+

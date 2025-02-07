@@ -1,0 +1,17 @@
+{
+  "$schema": "../workload_schema.json",
+  "sections": [
+    {
+      "groups": [
+        {
+          "inserts": {"amount": 1000, "key_len": 8, "val_len": 8},
+          "point_queries": {"amount": 1000}
+        },
+        {
+          "inserts": {"amount": 1000, "key_len": 8, "val_len": 8},
+          "point_queries": {"amount": 1000}
+        }
+      ]
+    }
+  ]
+}

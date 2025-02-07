@@ -1,30 +1,24 @@
 #![allow(clippy::needless_return)]
-use anyhow::{Context, Result};
+#![allow(dead_code)]
+
+use anyhow::{bail, Context, Result};
 use rand::distributions::Alphanumeric;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
-use std::collections::HashSet;
+use rand_xoshiro::Xoshiro256Plus;
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
-use std::thread::spawn;
-use rand_xoshiro::Xoshiro256PlusPlus;
 
 /// Workload specification.
-mod spec {
-    use std::collections::HashSet;
-
-    use rand::rngs::ThreadRng;
-    use rand::Rng;
-    use rand_distr::Alphanumeric;
-    use rayon::prelude::*;
+pub mod spec {
     use schemars::JsonSchema;
 
-    /// Specification for inserts in a workload section.
+    /// Specification for inserts in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub struct Inserts {
-        /// Number of inserts in the section
+        /// Number of inserts
         pub(crate) amount: usize,
         /// Key length
         pub(crate) key_len: usize,
@@ -32,161 +26,51 @@ mod spec {
         pub(crate) val_len: usize,
     }
 
-    impl Inserts {
-        pub(crate) fn generate_operations(&self, rng: &mut ThreadRng) -> Vec<Operation> {
-            let mut key = String::with_capacity(self.key_len);
-            let mut val = String::with_capacity(self.val_len);
-            (0..self.amount)
-                .map(|i| {
-                    if i % 1000 == 0 {
-                        println!("Generating insert {}", i);
-                    }
-                    key.clear();
-                    key.extend(
-                        rng.sample_iter(&Alphanumeric)
-                            .take(self.key_len)
-                            .map(char::from),
-                    );
-                    val.clear();
-                    val.extend(
-                        rng.sample_iter(&Alphanumeric)
-                            .take(self.val_len)
-                            .map(char::from),
-                    );
-
-                    return Operation::Insert(key.clone(), val.clone());
-                })
-                .collect()
-        }
-    }
-
-    /// Specification for updates in a workload section.
+    /// Specification for updates in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub struct Updates {
         /// Number of updates
         pub(crate) amount: usize,
         /// Value length
-        val_len: usize,
+        pub(crate) val_len: usize,
     }
 
-    impl Updates {
-        pub(crate) fn generate_operations(&self, valid_keys: &HashSet<String>) -> Vec<Operation> {
-            (0..self.amount)
-                .map(|_| {
-                    let random_idx = rand::thread_rng().gen_range(0..valid_keys.len());
-                    let key = valid_keys
-                        .iter()
-                        .nth(random_idx)
-                        .expect("index to be in range");
-
-                    let val: String = rand::thread_rng()
-                        .sample_iter(&Alphanumeric)
-                        .take(self.val_len)
-                        .map(char::from)
-                        .collect();
-
-                    return Operation::Update(key.clone(), val);
-                })
-                .collect()
-        }
-    }
-
-    /// Specification for point deletes in a workload section.
+    /// Specification for point deletes in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub struct Deletes {
         /// Number of deletes
         pub(crate) amount: usize,
     }
 
-    impl Deletes {
-        pub(crate) fn generate_operations(&self, valid_keys: &HashSet<String>) -> Vec<Operation> {
-            (0..self.amount)
-                .map(|_| {
-                    let random_idx = rand::thread_rng().gen_range(0..valid_keys.len());
-                    let key = valid_keys
-                        .iter()
-                        .nth(random_idx)
-                        .expect("index to be in range");
-
-                    return Operation::Delete(key.clone());
-                })
-                .collect()
-        }
-    }
-
-    /// Specification for point queries in a workload section.
+    /// Specification for point queries in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub struct PointQueries {
         /// Number of point queries
         pub(crate) amount: usize,
     }
 
-    impl PointQueries {
-        pub(crate) fn generate_operations(
-            &self,
-            valid_keys: &HashSet<String>,
-            rng: &mut ThreadRng,
-        ) -> Vec<Operation> {
-            (0..self.amount)
-                .map(|i| {
-                    if i % 1000 == 0 {
-                        println!("Generating point query {}", i);
-                    }
-                    let random_idx = rng.gen_range(0..valid_keys.len());
-                    let key = valid_keys
-                        .iter()
-                        .nth(random_idx)
-                        .expect("index to be in range");
-
-                    return Operation::PointQuery(key.clone());
-                })
-                .collect()
-        }
-    }
-
-    /// Specification for range queries in a workload section.
+    /// Specification for range queries in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
     pub struct RangeQueries {
         /// Number of range queries
         pub(crate) amount: usize,
         /// Selectivity of range queries. Based off of the range of valid keys, not the full
         /// key-space.
-        selectivity: f32,
-    }
-
-    impl RangeQueries {
-        pub(crate) fn generate_operations(&self, valid_keys: &HashSet<String>) -> Vec<Operation> {
-            assert!(0. <= self.selectivity && self.selectivity <= 1.);
-            let mut sorted_keys: Vec<_> = Vec::from_iter(valid_keys);
-            sorted_keys.sort();
-
-            (0..self.amount)
-                .map(|_| {
-                    let range_in_values =
-                        (sorted_keys.len() as f32 * self.selectivity).floor() as usize;
-                    let max_start_idx = sorted_keys.len() - range_in_values;
-                    let random_idx = rand::thread_rng().gen_range(0..max_start_idx);
-                    let key_start = sorted_keys[random_idx];
-                    let key_end = sorted_keys[random_idx + range_in_values];
-
-                    return Operation::RangeQuery(key_start.clone(), key_end.clone());
-                })
-                .collect()
-        }
+        pub(crate) selectivity: f32,
     }
 
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
-    pub(crate) struct WorkloadSpecSection {
-        pub(crate) inserts: Inserts,
+    pub(crate) struct WorkloadSpecGroup {
+        pub(crate) inserts: Option<Inserts>,
         pub(crate) updates: Option<Updates>,
         pub(crate) deletes: Option<Deletes>,
         pub(crate) point_queries: Option<PointQueries>,
         pub(crate) range_queries: Option<RangeQueries>,
     }
 
-    impl WorkloadSpecSection {
+    impl WorkloadSpecGroup {
         pub fn operation_count(&self) -> usize {
-            let operation_count = self.inserts.amount
+            let operation_count = self.inserts.map_or(0, |s| s.amount)
                 + self.updates.map_or(0, |us| us.amount)
                 + self.point_queries.map_or(0, |is| is.amount)
                 + self.range_queries.map_or(0, |is| is.amount)
@@ -195,8 +79,84 @@ mod spec {
         }
     }
 
+    #[derive(serde::Deserialize, JsonSchema, Default, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub(crate) enum KeySpace {
+        #[default]
+        Alphanumeric,
+    }
+    #[derive(serde::Deserialize, JsonSchema, Default, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub(crate) enum KeyDistribution {
+        #[default]
+        Uniform,
+    }
+
     #[derive(serde::Deserialize, JsonSchema, Clone)]
-    pub(crate) struct WorkloadSpec {
+    pub(crate) struct WorkloadSpecSection {
+        /// A list of operation groups that share keys between operations.
+        ///
+        /// E.g. non-empty point queries will use a key from an insert in this group.
+        pub(crate) groups: Vec<WorkloadSpecGroup>,
+        /// The domain from which the keys will be created from.
+        #[serde(default = "KeySpace::default")]
+        pub(crate) key_space: KeySpace,
+        /// The domain from which the keys will be created from.
+        #[serde(default = "KeyDistribution::default")]
+        pub(crate) key_distribution: KeyDistribution,
+    }
+
+    impl WorkloadSpecSection {
+        pub fn operation_count(&self) -> usize {
+            return self.groups.iter().map(|g| g.operation_count()).sum();
+        }
+
+        pub fn insert_count(&self) -> usize {
+            return self
+                .groups
+                .iter()
+                .map(|g| g.inserts.map_or(0, |is| is.amount))
+                .sum();
+        }
+
+        pub fn has_inserts(&self) -> bool {
+            return self.groups.iter().map(|g| g.inserts.is_some()).any(|x| x);
+        }
+
+        pub fn has_updates(&self) -> bool {
+            return self.groups.iter().map(|g| g.updates.is_some()).any(|x| x);
+        }
+        pub fn has_deletes(&self) -> bool {
+            return self.groups.iter().map(|g| g.deletes.is_some()).any(|x| x);
+        }
+        pub fn has_point_queries(&self) -> bool {
+            return self
+                .groups
+                .iter()
+                .map(|g| g.point_queries.is_some())
+                .any(|x| x);
+        }
+
+        pub fn has_range_queries(&self) -> bool {
+            return self
+                .groups
+                .iter()
+                .map(|g| g.range_queries.is_some())
+                .any(|x| x);
+        }
+
+        pub fn needs_dynamic_sorted_keys(&self) -> bool {
+            return self
+                .groups
+                .iter()
+                .map(|g| (g.inserts.is_some() || g.deletes.is_some()) && g.range_queries.is_some())
+                .any(|x| x);
+        }
+    }
+
+    #[derive(serde::Deserialize, JsonSchema, Clone)]
+    pub struct WorkloadSpec {
+        /// Sections of a workload where a key from one will (probably) not appear in another.
         pub(crate) sections: Vec<WorkloadSpecSection>,
     }
 
@@ -206,7 +166,7 @@ mod spec {
         }
     }
 
-    pub(crate) enum Operation {
+    pub enum Operation {
         Insert(String, String),
         Update(String, String),
         Delete(String),
@@ -215,14 +175,13 @@ mod spec {
     }
 
     impl Operation {
-        pub fn to_str(&self) -> String {
+        pub fn to_string(&self) -> String {
             match self {
                 Operation::Insert(k, v) => format!("I {k} {v}"),
                 Operation::Update(k, v) => format!("U {k} {v}"),
                 Operation::Delete(k) => format!("D {k}"),
-                // Operation::RangeDelete(ks, ke) => format!("X {ks} {ke}"),
                 Operation::PointQuery(k) => format!("P {k}"),
-                Operation::RangeQuery(ks, ke) => format!("R {ks} {ke}"),
+                Operation::RangeQuery(k1, k2) => format!("R {k1} {k2}"),
             }
         }
     }
@@ -250,157 +209,235 @@ enum OpMarker {
     RangeQuery,
 }
 
-fn generate_operations2(workload: WorkloadSpec) -> Vec<Operation> {
-    let mut all_operations: Vec<Operation> = Vec::with_capacity(workload.operation_count());
-    // let mut rng = rand::thread_rng();
-    let mut rng = Xoshiro256PlusPlus::from_entropy();
-
-    for workload_section in workload.sections {
-        let mut markers: Vec<OpMarker> = Vec::with_capacity(workload_section.operation_count());
-        let mut operations: Vec<Operation> = Vec::with_capacity(workload_section.operation_count());
-        let is = workload_section.inserts;
-        let mut valid_keys: Vec<String> = Vec::with_capacity(is.amount);
-
-        markers.append(&mut vec![OpMarker::Insert; is.amount - 1]);
-        if let Some(pqs) = workload_section.point_queries {
-            markers.append(&mut vec![OpMarker::PointQuery; pqs.amount]);
-        }
-        let rng_ref = &mut rng;
-        markers.shuffle(rng_ref);
-
-        // push the first insert
-        {
-            let mut key = String::with_capacity(is.key_len);
-            key.extend(
-                rng_ref
-                    .sample_iter(&Alphanumeric)
-                    .take(is.key_len)
-                    .map(char::from),
-            );
-            let mut val = String::with_capacity(is.val_len);
-            val.extend(
-                rng_ref
-                    .sample_iter(&Alphanumeric)
-                    .take(is.key_len)
-                    .map(char::from),
-            );
-            operations.push(Operation::Insert(key.clone(), val));
-            valid_keys.push(key);
-        }
-        for (i, marker) in markers.iter().enumerate() {
-            if i % 5000 == 0 {
-                println!("Generating operation {}", i);
-            }
-            match marker {
-                OpMarker::Insert => {
-                    let mut key = String::with_capacity(is.key_len);
-                    key.extend(
-                        rng_ref
-                            .sample_iter(&Alphanumeric)
-                            .take(is.key_len)
-                            .map(char::from),
-                    );
-                    let mut val = String::with_capacity(is.val_len);
-                    val.extend(
-                        rng_ref
-                            .sample_iter(&Alphanumeric)
-                            .take(is.key_len)
-                            .map(char::from),
-                    );
-                    operations.push(Operation::Insert(key.clone(), val));
-                    valid_keys.push(key);
-                }
-                OpMarker::PointQuery => {
-                    let key = valid_keys
-                        .iter()
-                        .nth(rng_ref.gen_range(0..valid_keys.len()))
-                        .unwrap();
-                    operations.push(Operation::PointQuery(key.clone()));
-                }
-                _ => {}
-            }
-        }
-
-        all_operations.append(&mut operations);
-    }
-
-    return all_operations;
+enum KeysSorted {
+    Dynamic(BTreeSet<String>),
+    Static(Vec<String>),
 }
 
-fn generate_operations(workload: WorkloadSpec) -> Vec<Operation> {
+#[inline(always)]
+fn gen_string(rng: &mut Xoshiro256Plus, len: usize) -> String {
+    let bytes: Vec<u8> = rng.sample_iter(Alphanumeric).take(len).collect();
+    let s = String::from_utf8(bytes)
+        .context("Generated an invalid utf-8 string")
+        .unwrap();
+    return s;
+}
+
+pub fn generate_operations2(workload: WorkloadSpec) -> Result<Vec<Operation>> {
     let mut all_operations: Vec<Operation> = Vec::with_capacity(workload.operation_count());
-    let mut rng = rand::thread_rng();
+    let mut rng = Xoshiro256Plus::from_entropy();
 
-    for workload_section in workload.sections {
-        let mut operations: Vec<Operation> = Vec::with_capacity(workload_section.operation_count());
-        let mut valid_keys: HashSet<String> = HashSet::new();
+    for section in workload.sections {
+        let mut keys_valid: Vec<String> = Vec::with_capacity(section.insert_count());
+        let has_rqs_and_is = section.needs_dynamic_sorted_keys();
 
-        // inserts
-        {
-            let is = workload_section.inserts;
-            let insert_operations = is.generate_operations(&mut rng);
-            let keys = insert_operations
-                .iter()
-                .map(|op| match op {
-                    Operation::Insert(k, _) => k.clone(),
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<String>>();
-            valid_keys.extend(keys);
+        for group in section.groups {
+            let mut keys_sorted = if has_rqs_and_is {
+                println!("[Warning] `inserts` and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
+                let mut btreeset = BTreeSet::new();
+                btreeset.extend(keys_valid.clone());
+                KeysSorted::Dynamic(btreeset)
+            } else {
+                let mut v = keys_valid.clone();
+                v.sort();
+                KeysSorted::Static(v)
+            };
+            // if section.has_deletes() && (section.has_point_queries() || section.has_range_queries() || section.has_inserts() || section.has_updates()) {
+            //     println!("[Warning] `deletes` and [`inserts` or `updates` or `point_queries` or `range_queries`] defined in the same group. This will be slower because the valid keys need to be sorted after insert.}}");
+            // }
+            let rng_ref = &mut rng;
+            let mut markers: Vec<OpMarker> = Vec::with_capacity(group.operation_count());
+            let mut operations: Vec<Operation> = Vec::with_capacity(group.operation_count());
 
-            operations.extend(insert_operations.into_iter());
+            if let Some(ds) = group.deletes {
+                if ds.amount > keys_valid.len() {
+                    bail!("Cannot have more deletes than existing valid keys.");
+                }
+            }
+
+            // A group must have at least 1 valid key before any other operation can occur.
+            // TODO: handle empty point queries
+            if keys_valid.len() == 0 {
+                if let Some(is) = group.inserts {
+                    markers.append(&mut vec![OpMarker::Insert; is.amount - 1]);
+
+                    let key = gen_string(rng_ref, is.key_len);
+                    let val = gen_string(rng_ref, is.val_len);
+                    operations.push(Operation::Insert(key.clone(), val));
+                    match keys_sorted {
+                        KeysSorted::Dynamic(ref mut keys) => {
+                            keys.insert(key.clone());
+                        }
+                        KeysSorted::Static(_) => {
+                            // no need to insert because the vec will be recreated in the next group
+                        }
+                    }
+                    keys_valid.push(key);
+                } else {
+                    bail!("Invalid workload spec. Group must have existing valid keys or have insert operations.");
+                }
+            } else {
+                if let Some(is) = group.inserts {
+                    markers.append(&mut vec![OpMarker::Insert; is.amount]);
+                }
+            }
+
+            if let Some(us) = group.updates {
+                markers.append(&mut vec![OpMarker::Update; us.amount]);
+            }
+            if let Some(pqs) = group.point_queries {
+                markers.append(&mut vec![OpMarker::PointQuery; pqs.amount]);
+            }
+            if let Some(rqs) = group.range_queries {
+                markers.append(&mut vec![OpMarker::RangeQuery; rqs.amount]);
+            }
+
+            markers.shuffle(rng_ref);
+
+            for marker in markers.iter() {
+                match marker {
+                    OpMarker::Insert => {
+                        let is = group
+                            .inserts
+                            .context("Insert marker can only appear when inserts is not None")?;
+                        let key = gen_string(rng_ref, is.key_len);
+                        let val = gen_string(rng_ref, is.val_len);
+                        operations.push(Operation::Insert(key.clone(), val));
+                        match keys_sorted {
+                            KeysSorted::Dynamic(ref mut keys) => {
+                                keys.insert(key.clone());
+                            }
+                            KeysSorted::Static(_) => {
+                                // no need to insert because the vec will be recreated in the next group
+                            }
+                        }
+                        keys_valid.push(key);
+                    }
+                    OpMarker::Update => {
+                        let us = group
+                            .updates
+                            .context("Update marker can only appear when updates is not None")?;
+                        let key = keys_valid[rng_ref.gen_range(0..keys_valid.len())].clone();
+                        let val = gen_string(rng_ref, us.val_len);
+
+                        operations.push(Operation::Update(key.clone(), val));
+                    }
+                    OpMarker::Delete => {
+                        let idx = rng_ref.gen_range(0..keys_valid.len());
+                        let key = keys_valid.remove(idx);
+                        match keys_sorted {
+                            KeysSorted::Dynamic(ref mut keys) => {
+                                keys.remove(&key);
+                            }
+                            KeysSorted::Static(_) => {
+                                // No need to remove key because keys_sorted will be recalculated in the next group
+                            }
+                        }
+
+                        operations.push(Operation::Delete(key));
+                    }
+                    OpMarker::PointQuery => {
+                        let key = keys_valid
+                            .iter()
+                            .nth(rng_ref.gen_range(0..keys_valid.len()))
+                            .unwrap();
+                        operations.push(Operation::PointQuery(key.clone()));
+                    }
+                    OpMarker::RangeQuery => {
+                        let rs = group.range_queries.context(
+                            "RangeQuery marker can only appear when range_queries is not None",
+                        )?;
+
+                        match keys_sorted {
+                            KeysSorted::Dynamic(ref mut keys) => {
+                                assert_eq!(keys.len(), keys_valid.len());
+
+                                let num_items =
+                                    (rs.selectivity * keys.len() as f32).floor() as usize;
+                                let start_range = 0..keys.len() - num_items;
+
+                                let start_idx = rng_ref.gen_range(start_range);
+                                let key1 = keys
+                                    .iter()
+                                    .nth(start_idx)
+                                    .context("Invalid range query start")?
+                                    .clone();
+
+                                let key2 = keys
+                                    .iter()
+                                    .nth(start_idx + num_items)
+                                    .context("Invalid range query end")?
+                                    .clone();
+
+                                operations.push(Operation::RangeQuery(key1, key2));
+                            }
+                            KeysSorted::Static(ref mut keys) => {
+                                assert_eq!(keys.len(), keys_valid.len());
+
+                                let num_items =
+                                    (rs.selectivity * keys.len() as f32).floor() as usize;
+                                let start_range = 0..keys.len() - num_items;
+
+                                let start_idx = rng_ref.gen_range(start_range);
+                                let key1 = keys[start_idx].clone();
+                                let key2 = keys[start_idx + num_items].clone();
+
+                                operations.push(Operation::RangeQuery(key1, key2));
+                            }
+                        }
+                    }
+                }
+            }
+
+            all_operations.append(&mut operations);
         }
-
-        // updates
-        if let Some(us) = workload_section.updates {
-            let update_operations = us.generate_operations(&valid_keys);
-            operations.extend(update_operations.into_iter());
-        }
-
-        // deletes
-        if let Some(ds) = workload_section.deletes {
-            let update_operations = ds.generate_operations(&valid_keys);
-            operations.extend(update_operations.into_iter());
-        }
-
-        // point queries
-        if let Some(pqs) = workload_section.point_queries {
-            let point_query_operations = pqs.generate_operations(&valid_keys, &mut rng);
-            operations.extend(point_query_operations.into_iter());
-        }
-
-        // range queries
-        if let Some(rqs) = workload_section.range_queries {
-            let update_operations = rqs.generate_operations(&valid_keys);
-            operations.extend(update_operations.into_iter());
-        }
-
-        operations.shuffle(&mut rng);
-        all_operations.extend(operations);
     }
 
-    return all_operations;
+    return Ok(all_operations);
 }
 
 /// Takes in a json representation of a workload specification and produces a workload string.
-///
-/// ```rust
-/// use workload_gen::generate_workload;
-/// let workload = generate_workload(
-///     r#" {"sections":[{"inserts":{"amount":1,"key_len":1,"val_len":1}}]} "#.into(),
-///    std::path::PathBuf::from("output.txt")
-/// );
-/// assert!(workload.is_ok());
-/// ```
 pub fn generate_workload(workload_spec_string: String, output_file: PathBuf) -> Result<()> {
     let workload_spec: WorkloadSpec =
         serde_json::from_str(&workload_spec_string).context("parsing json file")?;
-    let operations = generate_operations2(workload_spec);
+    let operations = generate_operations2(workload_spec)?;
 
     let mut buf_writer = BufWriter::new(File::create(output_file)?);
     operations.iter().for_each(|op| {
-        writeln!(buf_writer, "{}", op.to_str()).unwrap();
+        writeln!(buf_writer, "{}", op.to_string()).unwrap();
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_1m_i() {
+        let spec_str = include_str!("../test_specs/1m_i.json");
+        let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
+        let operations = generate_operations2(spec).unwrap();
+        assert_eq!(operations.len(), 1_000_000);
+    }
+
+    #[test]
+    fn test_1m_i_1m_rq() -> Result<()> {
+        let spec_str = include_str!("../test_specs/1m_i-1m_rq.json");
+        let spec = serde_json::from_str::<WorkloadSpec>(spec_str)?;
+        let operations = generate_operations2(spec)?;
+        assert_eq!(operations.len(), 2_000_000);
+
+        return Ok(());
+    }
+
+    #[test]
+    fn test_deletes() -> Result<()> {
+        let spec_str = include_str!("../test_specs/deletes.json");
+        let spec = serde_json::from_str::<WorkloadSpec>(spec_str)?;
+        let operations = generate_operations2(spec)?;
+        assert_eq!(operations.len(), 2_000_000);
+        return Ok(());
+    }
 }

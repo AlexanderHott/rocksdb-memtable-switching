@@ -1,0 +1,20 @@
+{
+  "$schema": "../workload_schema.json",
+  "sections": [
+    {
+      "key_distribution": "uniform",
+      "key_space": "alphanumeric",
+      "groups": [
+        {
+          "inserts": {
+            "amount": 10000,
+            "key_len": 8,
+            "val_len": 24
+          }
+        }
+      ]
+    }
+  ]
+}
+
+

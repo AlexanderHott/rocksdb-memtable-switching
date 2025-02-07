@@ -28,7 +28,7 @@ enum Command {
     Schema,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = Cli::parse();
 
     match args.command {

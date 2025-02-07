@@ -1,35 +1,39 @@
 {
-    "$schema": "../../workload_schema.json",
-    "sections": [
+  "$schema": "../../workload_schema.json",
+  "sections": [
+    {
+      "groups": [
         {
-            "inserts": {
-                "amount": 100,
-                "key_len": 16,
-                "val_len": 16
-            }
+          "inserts": {
+            "amount": 100,
+            "key_len": 16,
+            "val_len": 16
+          }
         },
         {
-            "updates": {
-                "amount": 50,
-                "val_len": 48
-            }
+          "updates": {
+            "amount": 50,
+            "val_len": 48
+          }
         },
         {
-            "point_queries": {
-                "amount": 8000
-            },
-            "range_queries": {
-                "amount": 2000,
-                "selectivity": 0.2
-            }
+          "point_queries": {
+            "amount": 8000
+          },
+          "range_queries": {
+            "amount": 2000,
+            "selectivity": 0.2
+          }
         },
         {
-            "point_queries": {
-                "amount": 1000
-            },
-            "deletes": {
-                "amount": 1000
-            }
+          "point_queries": {
+            "amount": 1000
+          },
+          "deletes": {
+            "amount": 1000
+          }
         }
-    ]
+      ]
+    }
+  ]
 }
