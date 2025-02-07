@@ -81,7 +81,8 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
             println!("Generating workload for: {}", path.display());
             let contents = fs::read_to_string(path)?;
 
-            let output_file = path.file_name()
+            let output_file = path
+                .file_name()
                 .and_then(|stem| stem.to_str())
                 .map(|stem| stem.rsplitn(3, '.').collect::<Vec<_>>()[2]) // file.spec.json -> file
                 .map(|stem| format!("{}.txt", stem)) // file -> file.txt
@@ -96,7 +97,7 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
             let mut output_file_path = output_path.clone();
             output_file_path.push(output_file);
 
-            generate_workload(contents, output_file_path.into())?;
+            generate_workload(contents, output_file_path)?;
         }
     } else if workload_path.is_file() {
         let contents = fs::read_to_string(&workload_path)?;
@@ -110,7 +111,7 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
         let mut output_file_path = output_path.clone();
         output_file_path.push(output_file);
 
-        generate_workload(contents, output_file_path.into())?;
+        generate_workload(contents, output_file_path)?;
     } else {
         unreachable!("Path is neither a file nor a directory");
     };
@@ -118,7 +119,7 @@ fn invoke_generate(workload_path: String, output: Option<String>) -> Result<()> 
     return Ok(());
 }
 
-/// Prints the json schmea for IDE integration.
+/// Prints the json schema for IDE integration.
 fn invoke_schema() -> Result<()> {
     let schema_str = generate_workload_spec_schema().context("Schema generation failed.")?;
     println!("{schema_str}");

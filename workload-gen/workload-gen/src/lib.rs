@@ -14,6 +14,7 @@ use std::path::PathBuf;
 /// Workload specification.
 pub mod spec {
     use schemars::JsonSchema;
+    use std::fmt::Formatter;
 
     /// Specification for inserts in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
@@ -120,37 +121,27 @@ pub mod spec {
         }
 
         pub fn has_inserts(&self) -> bool {
-            return self.groups.iter().map(|g| g.inserts.is_some()).any(|x| x);
+            return self.groups.iter().any(|g| g.inserts.is_some());
         }
 
         pub fn has_updates(&self) -> bool {
-            return self.groups.iter().map(|g| g.updates.is_some()).any(|x| x);
+            return self.groups.iter().any(|g| g.updates.is_some());
         }
         pub fn has_deletes(&self) -> bool {
-            return self.groups.iter().map(|g| g.deletes.is_some()).any(|x| x);
+            return self.groups.iter().any(|g| g.deletes.is_some());
         }
         pub fn has_point_queries(&self) -> bool {
-            return self
-                .groups
-                .iter()
-                .map(|g| g.point_queries.is_some())
-                .any(|x| x);
+            return self.groups.iter().any(|g| g.point_queries.is_some());
         }
 
         pub fn has_range_queries(&self) -> bool {
-            return self
-                .groups
-                .iter()
-                .map(|g| g.range_queries.is_some())
-                .any(|x| x);
+            return self.groups.iter().any(|g| g.range_queries.is_some());
         }
 
         pub fn needs_dynamic_sorted_keys(&self) -> bool {
-            return self
-                .groups
-                .iter()
-                .map(|g| (g.inserts.is_some() || g.deletes.is_some()) && g.range_queries.is_some())
-                .any(|x| x);
+            return self.groups.iter().any(|g| {
+                (g.inserts.is_some() || g.deletes.is_some()) && g.range_queries.is_some()
+            });
         }
     }
 
@@ -174,14 +165,14 @@ pub mod spec {
         RangeQuery(String, String),
     }
 
-    impl Operation {
-        pub fn to_string(&self) -> String {
+    impl std::fmt::Display for Operation {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             match self {
-                Operation::Insert(k, v) => format!("I {k} {v}"),
-                Operation::Update(k, v) => format!("U {k} {v}"),
-                Operation::Delete(k) => format!("D {k}"),
-                Operation::PointQuery(k) => format!("P {k}"),
-                Operation::RangeQuery(k1, k2) => format!("R {k1} {k2}"),
+                Operation::Insert(k, v) => write!(f, "I {k} {v}"),
+                Operation::Update(k, v) => write!(f, "U {k} {v}"),
+                Operation::Delete(k) => write!(f, "D {k}"),
+                Operation::PointQuery(k) => write!(f, "P {k}"),
+                Operation::RangeQuery(k1, k2) => write!(f, "R {k1} {k2}"),
             }
         }
     }
@@ -234,9 +225,9 @@ pub fn generate_operations2(workload: WorkloadSpec) -> Result<Vec<Operation>> {
         for group in section.groups {
             let mut keys_sorted = if has_rqs_and_is {
                 println!("[Warning] `inserts` and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
-                let mut btreeset = BTreeSet::new();
-                btreeset.extend(keys_valid.clone());
-                KeysSorted::Dynamic(btreeset)
+                let mut btree_set = BTreeSet::new();
+                btree_set.extend(keys_valid.clone());
+                KeysSorted::Dynamic(btree_set)
             } else {
                 let mut v = keys_valid.clone();
                 v.sort();
@@ -257,7 +248,7 @@ pub fn generate_operations2(workload: WorkloadSpec) -> Result<Vec<Operation>> {
 
             // A group must have at least 1 valid key before any other operation can occur.
             // TODO: handle empty point queries
-            if keys_valid.len() == 0 {
+            if keys_valid.is_empty() {
                 if let Some(is) = group.inserts {
                     markers.append(&mut vec![OpMarker::Insert; is.amount - 1]);
 
@@ -276,10 +267,8 @@ pub fn generate_operations2(workload: WorkloadSpec) -> Result<Vec<Operation>> {
                 } else {
                     bail!("Invalid workload spec. Group must have existing valid keys or have insert operations.");
                 }
-            } else {
-                if let Some(is) = group.inserts {
-                    markers.append(&mut vec![OpMarker::Insert; is.amount]);
-                }
+            } else if let Some(is) = group.inserts {
+                markers.append(&mut vec![OpMarker::Insert; is.amount]);
             }
 
             if let Some(us) = group.updates {
@@ -338,8 +327,7 @@ pub fn generate_operations2(workload: WorkloadSpec) -> Result<Vec<Operation>> {
                     }
                     OpMarker::PointQuery => {
                         let key = keys_valid
-                            .iter()
-                            .nth(rng_ref.gen_range(0..keys_valid.len()))
+                            .get(rng_ref.gen_range(0..keys_valid.len()))
                             .unwrap();
                         operations.push(Operation::PointQuery(key.clone()));
                     }
@@ -404,7 +392,7 @@ pub fn generate_workload(workload_spec_string: String, output_file: PathBuf) -> 
 
     let mut buf_writer = BufWriter::new(File::create(output_file)?);
     operations.iter().for_each(|op| {
-        writeln!(buf_writer, "{}", op.to_string()).unwrap();
+        writeln!(buf_writer, "{}", op).unwrap();
     });
 
     Ok(())
