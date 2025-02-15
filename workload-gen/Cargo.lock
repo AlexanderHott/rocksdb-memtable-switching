@@ -812,7 +812,6 @@ dependencies = [
  "rand",
  "rand_distr",
  "rand_xoshiro",
- "rayon",
  "schemars",
  "serde",
  "serde_json",

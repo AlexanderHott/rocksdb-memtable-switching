@@ -47,3 +47,24 @@ Options:
 
 - [ ] point queries based on existing or non existing keys. generate in batches
 - [ ] different distributions
+
+- speedups
+    - [ ] only sort / have data structures when they are necessary
+    - [ ] only store keys + write to buffered writer immediately
+    - [ ] only sort keys on rqs when there is an rq
+    - [ ] use indexes instead of pointers
+    - [ ] when comparing non-zero values, use multiple threads
+    - [ ] io_uring
+
+### Extra Data structures
+
+At a minimum, we need a `Vec<Option<String>>` holding valid keys.
+
+| Interleaving        | Inserts                                                                                                                                                                                                                                                                                                                             | Updates | Deletes                                             | Point Queries | Range Queries | Empty Point Queries |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------|-----------------------------------------------------|---------------|---------------|---------------------|
+| Inserts             | Append to valid keys                                                                                                                                                                                                                                                                                                                |         |                                                     |               |               |                     |
+| Updates             | Append to valid keys and generate a random index to pick the update key based on a distribution.                                                                                                                                                                                                                                    |         |                                                     |               |               |                     |
+| Deletes             | Append to valid keys. Delete by swapping an element to `None` in the `Vec`                                                                                                                                                                                                                                                          |         |                                                     |               |               |                     |
+| Point Queries       | Append to valid keys. Pick a random index in valid keys.                                                                                                                                                                                                                                                                            |         |                                                     |               |               |                     |
+| Range Queries       | Either store keys in a BTreeSet or sort valid keys before each range query. Pick an index between 0 and the max beginning of the valid range.                                                                                                                                                                                       |         | When sorting the valid keys, also filter out `None` |               |               |                     |
+| Empty Point Queries | Generate the inserts, and then generate n empty queries. Find out how many invalid empty point queries, generate that many. Loop until all valid empty queries, shuffle the operations. Alternatively, instead of keeping all the operations in memory, keep offsets in the file of where you need to write and fill them in later. |         |                                                     |               |               |                     |
