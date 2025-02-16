@@ -56,9 +56,12 @@ Options:
     - [ ] when comparing non-zero values, use multiple threads
     - [ ] io_uring
 
+- [ ] run a check of the workload spec before generating to check for errors like more deletes than valid keys or having
+  non-empty pqs without any inserts
+
 ### Extra Data structures
 
-At a minimum, we need a `Vec<Option<String>>` holding valid keys.
+At a minimum, we need a `Vec<Option<Box[u8]>>` holding valid keys.
 
 | Interleaving        | Inserts                                                                                                                                                                                                                                                                                                                             | Updates | Deletes                                             | Point Queries | Range Queries | Empty Point Queries |
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------|-----------------------------------------------------|---------------|---------------|---------------------|

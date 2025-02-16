@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../workload_schema.json",
+  "sections": [
+    {
+      "groups": [
+        {
+          "inserts": {
+            "amount": 1000000,
+            "key_len": 128,
+            "val_len": 896
+          }
+        },
+        {
+          "inserts": {
+            "amount": 1000000,
+            "key_len": 128,
+            "val_len": 896
+          },
+          "deletes": {
+            "amount": 1000000
+          }
+        }
+      ]
+    }
+  ]
+}
