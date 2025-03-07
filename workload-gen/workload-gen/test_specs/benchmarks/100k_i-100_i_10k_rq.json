@@ -5,14 +5,19 @@
       "groups": [
         {
           "inserts": {
-            "amount": 1000000,
+            "amount": 100000,
             "key_len": 128,
             "val_len": 896
           }
         },
         {
+          "inserts": {
+            "amount": 100,
+            "key_len": 128,
+            "val_len": 896
+          },
           "range_queries": {
-            "amount": 1000000,
+            "amount": 10000,
             "selectivity": 0.1
           }
         }

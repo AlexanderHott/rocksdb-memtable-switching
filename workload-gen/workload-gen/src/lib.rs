@@ -5,7 +5,6 @@ use anyhow::{bail, Context, Result};
 use rand::distr::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -15,7 +14,7 @@ pub mod spec {
     use schemars::JsonSchema;
 
     /// Specification for inserts in a workload group.
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct Inserts {
         /// Number of inserts
         pub(crate) amount: usize,
@@ -26,7 +25,7 @@ pub mod spec {
     }
 
     /// Specification for updates in a workload group.
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct Updates {
         /// Number of updates
         pub(crate) amount: usize,
@@ -35,21 +34,21 @@ pub mod spec {
     }
 
     /// Specification for point deletes in a workload group.
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct Deletes {
         /// Number of deletes
         pub(crate) amount: usize,
     }
 
     /// Specification for point queries in a workload group.
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct PointQueries {
         /// Number of point queries
         pub(crate) amount: usize,
     }
 
     /// Specification for range queries in a workload group.
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct RangeQueries {
         /// Number of range queries
         pub(crate) amount: usize,
@@ -58,7 +57,7 @@ pub mod spec {
         pub(crate) selectivity: f32,
     }
 
-    #[derive(serde::Deserialize, JsonSchema, Copy, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub(crate) struct WorkloadSpecGroup {
         pub(crate) inserts: Option<Inserts>,
         pub(crate) updates: Option<Updates>,
@@ -111,20 +110,20 @@ pub mod spec {
         }
     }
 
-    #[derive(serde::Deserialize, JsonSchema, Default, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Default, Clone, Debug)]
     #[serde(rename_all = "snake_case")]
     pub(crate) enum KeySpace {
         #[default]
         Alphanumeric,
     }
-    #[derive(serde::Deserialize, JsonSchema, Default, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Default, Clone, Debug)]
     #[serde(rename_all = "snake_case")]
     pub(crate) enum KeyDistribution {
         #[default]
         Uniform,
     }
 
-    #[derive(serde::Deserialize, JsonSchema, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Clone, Debug)]
     pub(crate) struct WorkloadSpecSection {
         /// A list of operation groups that share keys between operations.
         ///
@@ -271,7 +270,8 @@ enum OpMarker {
 enum KeysSorted {
     None,
     Static(Vec<Box<[u8]>>),
-    Dynamic(BTreeSet<Box<[u8]>>),
+    // Dynamic(BTreeSet<Box<[u8]>>),
+    Dynamic(Vec<Box<[u8]>>)
 }
 
 #[inline]
@@ -287,10 +287,11 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
 
         for group in &section.groups {
             let mut keys_sorted = if group.needs_dynamic_sorted_keys() {
-                println!("[Warning] (`inserts` or `deletes`) and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
-                let mut btree_set = BTreeSet::new();
-                btree_set.extend(keys_valid.clone());
-                KeysSorted::Dynamic(btree_set)
+                // println!("[Warning] (`inserts` or `deletes`) and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
+                // let mut btree_set = BTreeSet::new();
+                // btree_set.extend(keys_valid.clone());
+                // KeysSorted::Dynamic(btree_set)
+                KeysSorted::Dynamic(keys_valid.clone())
             } else if group.needs_static_sorted_keys() {
                 let mut v = keys_valid.clone();
                 v.sort();
@@ -319,7 +320,7 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                     Operation::write_insert(&mut writer, &key, &val)?;
                     match keys_sorted {
                         KeysSorted::Dynamic(ref mut keys) => {
-                            keys.insert(key.clone());
+                            keys.push(key.clone());
                         }
                         KeysSorted::Static(_) | KeysSorted::None => {
                             // no need to insert because the vec will be recreated in the next group
@@ -357,7 +358,7 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         Operation::write_insert(writer, &key, &val)?;
                         match keys_sorted {
                             KeysSorted::Dynamic(ref mut keys) => {
-                                keys.insert(key.clone());
+                                keys.push(key.clone());
                             }
                             KeysSorted::Static(_) | KeysSorted::None => {
                                 // no need to insert because the vec will be recreated in the next group
@@ -379,7 +380,8 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         let key = keys_valid.remove(idx);
                         match keys_sorted {
                             KeysSorted::Dynamic(ref mut keys) => {
-                                keys.remove(&key);
+                                let idx = keys.iter().position(|k| k == &key).context("Key not found")?;
+                                keys.remove(idx);
                             }
                             KeysSorted::Static(_) | KeysSorted::None => {
                                 // No need to remove key because keys_sorted will be recalculated in the next group
@@ -402,21 +404,16 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         match keys_sorted {
                             KeysSorted::Dynamic(ref mut keys) => {
                                 assert_eq!(keys.len(), keys_valid.len());
+                                keys_valid.sort();
 
                                 let num_items =
                                     (rs.selectivity * keys.len() as f32).floor() as usize;
                                 let start_range = 0..keys.len() - num_items;
 
                                 let start_idx = rng_ref.random_range(start_range);
-                                let key1 = keys
-                                    .iter()
-                                    .nth(start_idx)
-                                    .context("Invalid range query start")?;
+                                let key1 = &keys[start_idx];
 
-                                let key2 = keys
-                                    .iter()
-                                    .nth(start_idx + num_items)
-                                    .context("Invalid range query end")?;
+                                let key2 = &keys[start_idx + num_items];
 
                                 Operation::write_range_query(writer, key1, key2)?
                             }
@@ -452,6 +449,7 @@ pub fn generate_workload(workload_spec_string: String, output_file: PathBuf) -> 
         serde_json::from_str(&workload_spec_string).context("parsing json file")?;
     let mut buf_writer = BufWriter::with_capacity(1024 * 1024, File::create(output_file)?);
     write_operations(&mut buf_writer, &workload_spec)?;
+    buf_writer.flush()?;
 
     Ok(())
 }

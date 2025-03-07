@@ -5,3 +5,6 @@ members = [
     "workload-gen",
     "workload-gen-cli",
 ]
+
+[profile.release]
+debug = true

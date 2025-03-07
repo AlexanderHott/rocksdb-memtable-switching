@@ -12,12 +12,12 @@
         },
         {
           "inserts": {
-            "amount": 1000000,
+            "amount": 1000,
             "key_len": 128,
             "val_len": 896
           },
           "deletes": {
-            "amount": 1000000
+            "amount": 1000
           }
         }
       ]

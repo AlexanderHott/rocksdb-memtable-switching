@@ -16,8 +16,7 @@
           "range_queries": {
             "amount": 1000000,
             "selectivity": 0.4
-          },
-          "updates": {"amount": 1000000, "val_len": 896}
+          }
         }
       ]
     }
