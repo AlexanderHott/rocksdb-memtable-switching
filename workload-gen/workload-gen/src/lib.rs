@@ -47,6 +47,15 @@ pub mod spec {
         pub(crate) amount: usize,
     }
 
+    /// Specification for empty point queries in a workload group.
+    #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
+    pub struct EmptyPointQueries {
+        /// Number of point queries
+        pub(crate) amount: usize,
+        /// Key length
+        pub(crate) key_len: usize,
+    }
+
     /// Specification for range queries in a workload group.
     #[derive(serde::Deserialize, JsonSchema, Copy, Clone, Debug)]
     pub struct RangeQueries {
@@ -63,6 +72,7 @@ pub mod spec {
         pub(crate) updates: Option<Updates>,
         pub(crate) deletes: Option<Deletes>,
         pub(crate) point_queries: Option<PointQueries>,
+        pub(crate) empty_point_queries: Option<EmptyPointQueries>,
         pub(crate) range_queries: Option<RangeQueries>,
     }
 
@@ -71,6 +81,7 @@ pub mod spec {
             let operation_count = self.inserts.map_or(0, |s| s.amount)
                 + self.updates.map_or(0, |us| us.amount)
                 + self.point_queries.map_or(0, |is| is.amount)
+                + self.empty_point_queries.map_or(0, |is| is.amount)
                 + self.range_queries.map_or(0, |is| is.amount)
                 + self.deletes.map_or(0, |is| is.amount);
             return operation_count;
@@ -89,6 +100,9 @@ pub mod spec {
             let bytes_point_queries = self.point_queries.map_or(0, |pq| {
                 (b"P ".len() + insert_key_len + b"\n".len()) * pq.amount
             });
+            let bytes_empty_point_queries = self.empty_point_queries.map_or(0, |epq| {
+                (b"P ".len() + epq.key_len + b"\n".len()) * epq.amount
+            });
             let bytes_range_queries = self.range_queries.map_or(0, |rq| {
                 (b"R ".len() + insert_key_len + b" ".len() + insert_key_len + b"\n".len())
                     * rq.amount
@@ -97,17 +111,18 @@ pub mod spec {
                 + bytes_update
                 + bytes_delete
                 + bytes_point_queries
+                + bytes_empty_point_queries
                 + bytes_range_queries;
         }
 
-        pub fn needs_static_sorted_keys(&self) -> bool {
-            return self.range_queries.is_some();
-        }
-
-        pub fn needs_dynamic_sorted_keys(&self) -> bool {
-            return (self.inserts.is_some() || self.deletes.is_some())
-                && self.range_queries.is_some();
-        }
+        // pub fn needs_static_sorted_keys(&self) -> bool {
+        //     return self.range_queries.is_some();
+        // }
+        //
+        // pub fn needs_dynamic_sorted_keys(&self) -> bool {
+        //     return (self.inserts.is_some() || self.deletes.is_some())
+        //         && self.range_queries.is_some();
+        // }
     }
 
     #[derive(serde::Deserialize, JsonSchema, Default, Clone, Debug)]
@@ -177,13 +192,16 @@ pub mod spec {
         pub fn has_point_queries(&self) -> bool {
             return self.groups.iter().any(|g| g.point_queries.is_some());
         }
+        pub fn has_empty_point_queries(&self) -> bool {
+            return self.groups.iter().any(|g| g.empty_point_queries.is_some());
+        }
 
         pub fn has_range_queries(&self) -> bool {
             return self.groups.iter().any(|g| g.range_queries.is_some());
         }
     }
 
-    #[derive(serde::Deserialize, JsonSchema, Clone)]
+    #[derive(serde::Deserialize, JsonSchema, Debug, Clone)]
     pub struct WorkloadSpec {
         /// Sections of a workload where a key from one will (probably) not appear in another.
         pub(crate) sections: Vec<WorkloadSpecSection>,
@@ -264,6 +282,7 @@ enum OpMarker {
     Update,
     Delete,
     PointQuery,
+    EmptyPointQuery,
     RangeQuery,
 }
 
@@ -304,14 +323,20 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
 
             // A group must have at least 1 valid key before any other operation can occur.
             // TODO: handle empty point queries
-            if keys_valid.is_empty() {
+            if (group.inserts.is_some()
+                || group.updates.is_some()
+                || group.deletes.is_some()
+                || group.point_queries.is_some()
+                || group.range_queries.is_some())
+                && keys_valid.is_empty()
+            {
                 if let Some(is) = group.inserts {
                     markers.append(&mut vec![OpMarker::Insert; is.amount - 1]);
 
                     let key = gen_string(rng_ref, is.key_len);
                     let val = gen_string(rng_ref, is.val_len);
                     Operation::write_insert(&mut writer, &key, &val)?;
-                    // there are 0 elements in the array, so adding 1 still means its sorted
+                    // CORRECTNESS: there are 0 elements in the array, so adding 1 still means its sorted
                     keys_valid.push(key);
                     // match keys_sorted {
                     //     KeysSorted::Dynamic(ref mut keys) => {
@@ -322,6 +347,7 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                     //     }
                     // }
                 } else {
+                    eprintln!("{:#?}", workload);
                     bail!("Invalid workload spec. Group must have existing valid keys or have insert operations.");
                 }
             } else if let Some(is) = group.inserts {
@@ -337,6 +363,9 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
             if let Some(pqs) = group.point_queries {
                 markers.append(&mut vec![OpMarker::PointQuery; pqs.amount]);
             }
+            if let Some(epqs) = group.empty_point_queries {
+                markers.append(&mut vec![OpMarker::EmptyPointQuery; epqs.amount]);
+            }
             if let Some(rqs) = group.range_queries {
                 markers.append(&mut vec![OpMarker::RangeQuery; rqs.amount]);
             }
@@ -350,7 +379,10 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         let key = gen_string(rng_ref, is.key_len);
                         let val = gen_string(rng_ref, is.val_len);
                         Operation::write_insert(writer, &key, &val)?;
-                        keys_valid_sorted = &key >= keys_valid.last().expect("there should be at least 1 key in the array");
+                        keys_valid_sorted = &key
+                            >= keys_valid
+                                .last()
+                                .expect("there should be at least 1 key in the array");
                         keys_valid.push(key);
                         // match keys_sorted {
                         //     KeysSorted::Dynamic(ref mut keys) => {
@@ -393,6 +425,19 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                             .get(rng_ref.random_range(0..keys_valid.len()))
                             .unwrap();
                         Operation::write_point_query(writer, key)?
+                    }
+                    OpMarker::EmptyPointQuery => {
+                        let epq = group.empty_point_queries.context(
+                            "EmptyPointQuery marker can only appear when point_queries is not None",
+                        )?;
+                        let key = loop {
+                            let key = gen_string(rng_ref, epq.key_len);
+                            if !keys_valid.contains(&key) {
+                                break key;
+                            }
+                        };
+
+                        Operation::write_point_query(writer, &key)?
                     }
                     OpMarker::RangeQuery => {
                         let rs = group.range_queries.context(
@@ -472,7 +517,7 @@ mod tests {
     use std::io::BufRead;
 
     #[test]
-    fn test_1m_i() {
+    fn workload_1m_i() {
         let spec_str = include_str!("../test_specs/1m_i.json");
         let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
         let bytes_count = spec.bytes_count();
@@ -483,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_1m_i_1m_rq() {
+    fn workload_1m_i_1m_rq() {
         let spec_str = include_str!("../test_specs/1m_i-1m_rq.json");
         let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
         let bytes_count = spec.bytes_count();
@@ -495,13 +540,24 @@ mod tests {
     }
 
     #[test]
-    fn test_deletes() {
+    fn deletes() {
         let spec_str = include_str!("../test_specs/deletes.json");
         let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
         let bytes_count = spec.bytes_count();
         let mut buf = Vec::with_capacity(bytes_count);
         write_operations(&mut buf, &spec).unwrap();
         assert_eq!(buf.lines().count(), 1_100_000);
+        assert_eq!(buf.len(), bytes_count);
+    }
+
+    #[test]
+    fn empty_point_queries() {
+        let spec_str = include_str!("../test_specs/empty_point_queries.json");
+        let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
+        let bytes_count = spec.bytes_count();
+        let mut buf = Vec::with_capacity(bytes_count);
+        write_operations(&mut buf, &spec).unwrap();
+        assert_eq!(buf.lines().count(), 101_000);
         assert_eq!(buf.len(), bytes_count);
     }
 }

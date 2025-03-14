@@ -16,7 +16,7 @@
   },
   "definitions": {
     "Deletes": {
-      "description": "Specification for point deletes in a workload section.",
+      "description": "Specification for point deletes in a workload group.",
       "type": "object",
       "required": [
         "amount"
@@ -30,8 +30,30 @@
         }
       }
     },
+    "EmptyPointQueries": {
+      "description": "Specification for empty point queries in a workload group.",
+      "type": "object",
+      "required": [
+        "amount",
+        "key_len"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Number of point queries",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "key_len": {
+          "description": "Key length",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
     "Inserts": {
-      "description": "Specification for inserts in a workload section.",
+      "description": "Specification for inserts in a workload group.",
       "type": "object",
       "required": [
         "amount",
@@ -72,7 +94,7 @@
       ]
     },
     "PointQueries": {
-      "description": "Specification for point queries in a workload section.",
+      "description": "Specification for point queries in a workload group.",
       "type": "object",
       "required": [
         "amount"
@@ -87,7 +109,7 @@
       }
     },
     "RangeQueries": {
-      "description": "Specification for range queries in a workload section.",
+      "description": "Specification for range queries in a workload group.",
       "type": "object",
       "required": [
         "amount",
@@ -108,7 +130,7 @@
       }
     },
     "Updates": {
-      "description": "Specification for updates in a workload section.",
+      "description": "Specification for updates in a workload group.",
       "type": "object",
       "required": [
         "amount",
@@ -136,6 +158,16 @@
           "anyOf": [
             {
               "$ref": "#/definitions/Deletes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "empty_point_queries": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EmptyPointQueries"
             },
             {
               "type": "null"
