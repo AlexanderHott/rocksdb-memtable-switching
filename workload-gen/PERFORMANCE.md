@@ -75,6 +75,18 @@ New times, not comparable with older numbers
 | insert + range query (heavy rq) |   3.9176 |
 | range query                     |   1.6309 |
 
+Get rid of `keys_sorted` and sort `keys_valid` during range queries.
+
+| Workload                        | Time (s) |
+|---------------------------------|---------:|
+| insert + update                 |   3.7412 |
+| insert + delete                 |   1.3253 |
+| insert + point query            |   2.4357 |
+| insert + range query (even)     |   0.2501 |
+| insert + range query (heavy i)  |   0.2585 |
+| insert + range query (heavy rq) |   0.1299 |
+| range query                     |   1.4959 |
+
 - perf
 - valgrind
   - cache grind

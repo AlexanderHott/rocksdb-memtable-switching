@@ -210,8 +210,8 @@ mod schema {
     }
 }
 
-pub use schema::generate_workload_spec_schema;
-use spec::*;
+pub use crate::schema::generate_workload_spec_schema;
+use crate::spec::WorkloadSpec;
 
 struct Operation;
 impl Operation {
@@ -267,13 +267,6 @@ enum OpMarker {
     RangeQuery,
 }
 
-enum KeysSorted {
-    None,
-    Static(Vec<Box<[u8]>>),
-    // Dynamic(BTreeSet<Box<[u8]>>),
-    Dynamic(Vec<Box<[u8]>>)
-}
-
 #[inline]
 fn gen_string(rng: &mut Xoshiro256Plus, len: usize) -> Box<[u8]> {
     return rng.sample_iter(Alphanumeric).take(len).collect();
@@ -284,21 +277,21 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
 
     for section in &workload.sections {
         let mut keys_valid: Vec<Box<[u8]>> = Vec::with_capacity(section.insert_count());
+        let mut keys_valid_sorted = true;
 
         for group in &section.groups {
-            let mut keys_sorted = if group.needs_dynamic_sorted_keys() {
-                // println!("[Warning] (`inserts` or `deletes`) and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
-                // let mut btree_set = BTreeSet::new();
-                // btree_set.extend(keys_valid.clone());
-                // KeysSorted::Dynamic(btree_set)
-                KeysSorted::Dynamic(keys_valid.clone())
-            } else if group.needs_static_sorted_keys() {
-                let mut v = keys_valid.clone();
-                v.sort();
-                KeysSorted::Static(v)
-            } else {
-                KeysSorted::None
-            };
+            // let mut keys_sorted = if group.needs_dynamic_sorted_keys() {
+            //     // println!("[Warning] (`inserts` or `deletes`) and `range_queries` defined in the same group. This will be slower because the valid keys need to be sorted after insert.");
+            //     let mut indices: Vec<usize> = (0..keys_valid.len()).collect();
+            //     indices.sort_by(|&a, &b| keys_valid[a].cmp(&keys_valid[b]));
+            //     KeysSorted::Dynamic(indices)
+            // } else if group.needs_static_sorted_keys() {
+            //     let mut indices: Vec<usize> = (0..keys_valid.len()).collect();
+            //     indices.sort_by(|&a, &b| keys_valid[a].cmp(&keys_valid[b]));
+            //     KeysSorted::Static(indices)
+            // } else {
+            //     KeysSorted::None
+            // };
 
             let rng_ref = &mut rng;
             let mut markers: Vec<OpMarker> = Vec::with_capacity(group.operation_count());
@@ -318,15 +311,16 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                     let key = gen_string(rng_ref, is.key_len);
                     let val = gen_string(rng_ref, is.val_len);
                     Operation::write_insert(&mut writer, &key, &val)?;
-                    match keys_sorted {
-                        KeysSorted::Dynamic(ref mut keys) => {
-                            keys.push(key.clone());
-                        }
-                        KeysSorted::Static(_) | KeysSorted::None => {
-                            // no need to insert because the vec will be recreated in the next group
-                        }
-                    }
+                    // there are 0 elements in the array, so adding 1 still means its sorted
                     keys_valid.push(key);
+                    // match keys_sorted {
+                    //     KeysSorted::Dynamic(ref mut keys) => {
+                    //         keys.push(keys_valid.len() - 1);
+                    //     }
+                    //     KeysSorted::Static(_) | KeysSorted::None => {
+                    //         // no need to insert because the vec will be recreated in the next group
+                    //     }
+                    // }
                 } else {
                     bail!("Invalid workload spec. Group must have existing valid keys or have insert operations.");
                 }
@@ -356,15 +350,16 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         let key = gen_string(rng_ref, is.key_len);
                         let val = gen_string(rng_ref, is.val_len);
                         Operation::write_insert(writer, &key, &val)?;
-                        match keys_sorted {
-                            KeysSorted::Dynamic(ref mut keys) => {
-                                keys.push(key.clone());
-                            }
-                            KeysSorted::Static(_) | KeysSorted::None => {
-                                // no need to insert because the vec will be recreated in the next group
-                            }
-                        }
+                        keys_valid_sorted = &key >= keys_valid.last().expect("there should be at least 1 key in the array");
                         keys_valid.push(key);
+                        // match keys_sorted {
+                        //     KeysSorted::Dynamic(ref mut keys) => {
+                        //         keys.push(keys_valid.len() - 1);
+                        //     }
+                        //     KeysSorted::Static(_) | KeysSorted::None => {
+                        //         // no need to insert because the vec will be recreated in the next group
+                        //     }
+                        // }
                     }
                     OpMarker::Update => {
                         let us = group
@@ -378,15 +373,18 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                     OpMarker::Delete => {
                         let idx = rng_ref.random_range(0..keys_valid.len());
                         let key = keys_valid.remove(idx);
-                        match keys_sorted {
-                            KeysSorted::Dynamic(ref mut keys) => {
-                                let idx = keys.iter().position(|k| k == &key).context("Key not found")?;
-                                keys.remove(idx);
-                            }
-                            KeysSorted::Static(_) | KeysSorted::None => {
-                                // No need to remove key because keys_sorted will be recalculated in the next group
-                            }
-                        }
+                        // match keys_sorted {
+                        //     KeysSorted::Dynamic(ref mut keys) => {
+                        //         let idx = keys
+                        //             .iter()
+                        //             .position(|&k| keys_valid[k] == key)
+                        //             .context("Key not found")?;
+                        //         keys.remove(idx);
+                        //     }
+                        //     KeysSorted::Static(_) | KeysSorted::None => {
+                        //         // No need to remove key because keys_sorted will be recalculated in the next group
+                        //     }
+                        // }
 
                         Operation::write_delete(writer, &key)?;
                     }
@@ -401,39 +399,53 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                             "RangeQuery marker can only appear when range_queries is not None",
                         )?;
 
-                        match keys_sorted {
-                            KeysSorted::Dynamic(ref mut keys) => {
-                                assert_eq!(keys.len(), keys_valid.len());
-                                keys_valid.sort();
-
-                                let num_items =
-                                    (rs.selectivity * keys.len() as f32).floor() as usize;
-                                let start_range = 0..keys.len() - num_items;
-
-                                let start_idx = rng_ref.random_range(start_range);
-                                let key1 = &keys[start_idx];
-
-                                let key2 = &keys[start_idx + num_items];
-
-                                Operation::write_range_query(writer, key1, key2)?
-                            }
-                            KeysSorted::Static(ref mut keys) => {
-                                assert_eq!(keys.len(), keys_valid.len());
-
-                                let num_items =
-                                    (rs.selectivity * keys.len() as f32).floor() as usize;
-                                let start_range = 0..keys.len() - num_items;
-
-                                let start_idx = rng_ref.random_range(start_range);
-                                let key1 = &keys[start_idx];
-                                let key2 = &keys[start_idx + num_items];
-
-                                Operation::write_range_query(writer, key1, key2)?
-                            }
-                            KeysSorted::None => {
-                                unreachable!("Range queries require sorted keys");
-                            }
+                        if !keys_valid_sorted {
+                            keys_valid.sort();
+                            keys_valid_sorted = true;
                         }
+                        let num_items = (rs.selectivity * keys_valid.len() as f32).floor() as usize;
+                        let start_range = 0..keys_valid.len() - num_items;
+
+                        let start_idx = rng_ref.random_range(start_range);
+                        let key1 = &keys_valid[start_idx];
+                        let key2 = &keys_valid[start_idx + num_items];
+
+                        Operation::write_range_query(writer, key1, key2)?
+
+                        // match keys_sorted {
+                        //     KeysSorted::Dynamic(ref mut keys) => {
+                        //         assert_eq!(keys.len(), keys_valid.len());
+                        //         // keys_valid.sort();
+                        //         keys.sort_by(|&a, &b| keys_valid[a].cmp(&keys_valid[b]));
+                        //
+                        //         let num_items =
+                        //             (rs.selectivity * keys.len() as f32).floor() as usize;
+                        //         let start_range = 0..keys.len() - num_items;
+                        //
+                        //         let start_idx = rng_ref.random_range(start_range);
+                        //         let key1 = &keys_valid[keys[start_idx]];
+                        //
+                        //         let key2 = &keys_valid[keys[start_idx + num_items]];
+                        //
+                        //         Operation::write_range_query(writer, key1, key2)?
+                        //     }
+                        //     KeysSorted::Static(ref mut keys) => {
+                        //         assert_eq!(keys.len(), keys_valid.len());
+                        //
+                        //         let num_items =
+                        //             (rs.selectivity * keys.len() as f32).floor() as usize;
+                        //         let start_range = 0..keys.len() - num_items;
+                        //
+                        //         let start_idx = rng_ref.random_range(start_range);
+                        //         let key1 = &keys_valid[keys[start_idx]];
+                        //         let key2 = &keys_valid[keys[start_idx + num_items]];
+                        //
+                        //         Operation::write_range_query(writer, key1, key2)?
+                        //     }
+                        //     KeysSorted::None => {
+                        //         unreachable!("Range queries require sorted keys");
+                        //     }
+                        // }
                     }
                 }
             }
