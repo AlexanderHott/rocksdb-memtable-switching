@@ -430,6 +430,7 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
                         let epq = group.empty_point_queries.context(
                             "EmptyPointQuery marker can only appear when point_queries is not None",
                         )?;
+                        // let key = gen_string(rng_ref, epq.key_len);
                         let key = loop {
                             let key = gen_string(rng_ref, epq.key_len);
                             if !keys_valid.contains(&key) {

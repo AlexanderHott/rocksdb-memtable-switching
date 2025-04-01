@@ -83,11 +83,25 @@ Get rid of `keys_sorted` and sort `keys_valid` during range queries.
 | insert + delete                 |   1.3253 |
 | insert + point query            |   2.4357 |
 | insert + range query (even)     |   0.2501 |
-| insert + range query (heavy i)  |   0.2585 |
+| insert + range query (heavy i)  |   0.0259 |
 | insert + range query (heavy rq) |   0.1299 |
 | range query                     |   1.4959 |
 
+Implement a naive empty point query option. It is so slow, so the benchmark only has 100k inserts and 1k empty point
+queries.
+
+| Workload                           | Time (s) |
+|------------------------------------|---------:|
+| insert + update                    |   3.7798 |
+| insert + delete                    |   1.3371 |
+| insert + point query               |   2.4414 |
+| insert + range query (even)        |   0.0249 |
+| insert + range query (heavy i)     |   0.2585 |
+| insert + range query (heavy rq)    |   0.1272 |
+| range query                        |   1.3429 |
+| empty point query (100k i, 1k eqp) |   0.2096 |
+
 - perf
 - valgrind
-  - cache grind
+    - cache grind
 - io_stat

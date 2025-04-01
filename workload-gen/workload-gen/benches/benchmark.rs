@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use std::io::sink;
 use criterion::{criterion_group, criterion_main, Criterion};
 use workload_gen::{write_operations, spec::WorkloadSpec};
@@ -38,6 +40,11 @@ fn bench_10k_i__10k_rq() {
     let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
     write_operations(&mut sink(), &spec).unwrap();
 }
+fn bench_100k_i__1k_eqp() {
+    let spec_str = include_str!("../test_specs/benchmarks/100k_i-1k_eqp.json");
+    let spec = serde_json::from_str::<WorkloadSpec>(spec_str).unwrap();
+    write_operations(&mut sink(), &spec).unwrap();
+}
 
 
 
@@ -49,11 +56,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("insert + range query (heavy i)", |b| b.iter(|| bench_10k_i__100k_i_100_rq()));
     c.bench_function("insert + range query (heavy rq)", |b| b.iter(|| bench_10k_i__100_i_10k_rq()));
     c.bench_function("range query", |b| b.iter(|| bench_10k_i__10k_rq()));
+    c.bench_function("empty point query", |b| b.iter(|| bench_100k_i__1k_eqp()));
 }
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(20);
+    config = Criterion::default().sample_size(100);
     targets = criterion_benchmark
 );
 criterion_main!(benches);
