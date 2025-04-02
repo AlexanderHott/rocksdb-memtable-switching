@@ -1,7 +1,7 @@
 #pragma once
 #include <rocksdb/options.h>
 #include <rocksdb/table.h>
-#include <rocksdb/utilities/json.hpp>
+#include "../third_party/json.hpp"
 
 namespace cfg {
     using json = nlohmann::json;

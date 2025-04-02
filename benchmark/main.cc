@@ -1,8 +1,11 @@
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <string>
-#include <variant>
 #include <rocksdb/db.h>
+
+#include <zmq.hpp>
+#include <stats_collector.hpp>
 
 #include "cfg.h"
 
@@ -11,12 +14,6 @@ using ns = std::chrono::nanoseconds;
 using std::chrono::duration_cast;
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-
-using OpType = rocksdb::StatsCollector::OpType;
-using OpResult = rocksdb::StatsCollector::OpResult;
-using MemtableSwitch = rocksdb::StatsCollector::MemtableSwitch;
-using BenchmarkEvent = rocksdb::StatsCollector::BenchmarkEvent;
-
 
 #define LOG(msg) \
 std::cout << __FILE__ << "(" << __LINE__ << "): " << msg << std::endl
@@ -47,17 +44,17 @@ std::string sanitize_file_name(const std::string &file_path) {
 }
 
 
-class FlushEventListener final : public rocksdb::EventListener {
-public:
-    explicit FlushEventListener() = default;
-
-    void OnMemTableSealed(const rocksdb::MemTableInfo &mem_table_info) override {
-        LOG("memtable sealed with "
-            << mem_table_info.num_entries
-            << " entries"
-        );
-    }
-};
+// class FlushEventListener final : public rocksdb::EventListener {
+// public:
+//     explicit FlushEventListener() = default;
+//
+//     void OnMemTableSealed(const rocksdb::MemTableInfo &mem_table_info) override {
+//         LOG("memtable sealed with "
+//             << mem_table_info.num_entries
+//             << " entries"
+//         );
+//     }
+// };
 
 
 void benchmark(const std::string &config_path, const std::string &workload_path, const std::string &save_path) {
@@ -69,7 +66,7 @@ void benchmark(const std::string &config_path, const std::string &workload_path,
     rocksdb::DB *db;
     DestroyDB(db_path, opts);
 
-    opts.listeners.push_back(std::make_shared<FlushEventListener>());
+    // opts.listeners.push_back(std::make_shared<FlushEventListener>());
 
     rocksdb::Status s;
     s = rocksdb::DB::Open(opts, db_path, &db);
@@ -92,6 +89,10 @@ void benchmark(const std::string &config_path, const std::string &workload_path,
         db->zmq_socket_->send(msg, zmq::send_flags::none);
     }
 
+    db->stats_collector_ = std::make_shared<StatsCollector>();
+    db->zmq_context_ = zmq::context_t();
+    db->zmq_socket_ = std::make_shared<zmq::socket_t>(db->zmq_context_, zmq::socket_type::pair);
+    db->zmq_socket_->bind("ipc:///tmp/rocksdb-memtable-switching-ipc");
 
     LOG("running workload " << workload_path << " with config " << config_path);
     std::istream *input;
@@ -223,14 +224,14 @@ int main(int argc, char *argv[]) {
         for (const auto &workload: workloads) {
             if (
                 (workload == "../benchmark-runs/dynamic/5k_i-445k_pq.txt" &&
-                config == "../benchmark-runs/dynamic/vector.options.json" )
+                 config == "../benchmark-runs/dynamic/vector.options.json")
                 ||
                 (workload == "../benchmark-runs/dynamic/250k_i-250k_pq.txt" &&
-                config == "../benchmark-runs/dynamic/vector.options.json" )
+                 config == "../benchmark-runs/dynamic/vector.options.json")
                 ||
                 (workload == "../benchmark-runs/dynamic/dynamic.txt" &&
-                config == "../benchmark-runs/dynamic/vector.options.json" )
-                ) {
+                 config == "../benchmark-runs/dynamic/vector.options.json")
+            ) {
                 LOG("Skipping slow workload");
                 continue;
             }
@@ -241,11 +242,6 @@ int main(int argc, char *argv[]) {
             );
         }
     }
-    // benchmark(
-    //     "../benchmark-runs/static-memtables/dynamic.options.json",
-    //     "../benchmark-runs/static-memtables/100k_i.txt",
-    //     workload_run_path
-    // );
 
     return 0;
 }

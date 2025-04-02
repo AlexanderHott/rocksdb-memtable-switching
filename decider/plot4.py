@@ -34,7 +34,7 @@ def plot_grouped_bar_chart(results):
     x = np.arange(len(workloads))  # Group positions
     bar_width = 0.8 / len(options)  # Width of each bar
 
-    patterns = [' ', '\\\\\\\\', '||||', '----', '....']
+    patterns = ['\\\\\\\\', '||||', '----', '....']
     fig, ax = plt.subplots(figsize=(10, 6))
 
     for i, option in enumerate(options):
@@ -42,6 +42,7 @@ def plot_grouped_bar_chart(results):
         times = [results[workload].get(option, 0) for workload in workloads]
         # Bar positions for this option
         bar_positions = x + i * bar_width
+        print("times", times)
         bars = ax.bar(bar_positions, times, bar_width, label=option, color='white', edgecolor='black')
         for bar in bars:
             # Ensure that the patterns loop if there are more bars than patterns
@@ -49,8 +50,8 @@ def plot_grouped_bar_chart(results):
     # Labels and legends
     ax.set_xlabel("Workloads")
     ax.set_ylabel("Total Latency (s)")
-    ax.set_yscale('log')
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x):,}"))
+    # ax.set_yscale('log')
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.2}"))
     ax.set_title("Workload latencies per Memtable")
     ax.set_xticks(x + (len(options) - 1) * bar_width / 2)
     ax.set_xticklabels(workloads)
@@ -62,6 +63,6 @@ def plot_grouped_bar_chart(results):
 
 # Main execution
 if __name__ == "__main__":
-    directory = "../benchmark-runs/dynamic"  # Replace with the path to your files
+    directory = "../benchmark-runs/sandbox"  # Replace with the path to your files
     results = parse_results(directory)
     plot_grouped_bar_chart(results)
