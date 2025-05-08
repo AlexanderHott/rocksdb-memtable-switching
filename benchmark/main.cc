@@ -90,9 +90,9 @@ void benchmark(const std::string &config_path, const std::string &workload_path,
     }
 
     db->stats_collector_ = std::make_shared<StatsCollector>();
-    db->zmq_context_ = zmq::context_t();
-    db->zmq_socket_ = std::make_shared<zmq::socket_t>(db->zmq_context_, zmq::socket_type::pair);
-    db->zmq_socket_->bind("ipc:///tmp/rocksdb-memtable-switching-ipc");
+    // db->zmq_context_ = zmq::context_t();
+    // db->zmq_socket_ = std::make_shared<zmq::socket_t>(db->zmq_context_, zmq::socket_type::pair);
+    // db->zmq_socket_->bind("ipc:///tmp/rocksdb-memtable-switching-ipc");
 
     LOG("running workload " << workload_path << " with config " << config_path);
     std::istream *input;

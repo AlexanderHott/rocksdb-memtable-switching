@@ -101,6 +101,50 @@ queries.
 | range query                        |   1.3429 |
 | empty point query (100k i, 1k eqp) |   0.2096 |
 
+## More powerful key generation
+
+No change
+
+| Workload                           | Time (s) |
+|------------------------------------|---------:|
+| insert + update                    |   4.1403 |
+| insert + delete                    |   1.4595 |
+| insert + point query               |   2.7162 |
+| insert + range query (even)        |   0.0270 |
+| insert + range query (heavy i)     |   0.2880 |
+| insert + range query (heavy rq)    |   0.1415 |
+| range query                        |   1.5583 |
+| empty point query (100k i, 1k eqp) |   0.2079 |
+| **total benchmark time**           | 00:18:28 |
+
+
+```json
+{
+  "key": {
+    "segmented": {
+      "separator": ";",
+      "segments": [
+        {
+          "discrete": {
+            "user": 0.6,
+            "part": 0.4
+          }
+        },
+        {
+          "distribution": "uniform",
+          "space": "Alphanumeric",
+          "length": 16
+        }
+      ]
+    }
+  }
+}
+```
+
+## TODO
+
+look into:
+
 - perf
 - valgrind
     - cache grind
