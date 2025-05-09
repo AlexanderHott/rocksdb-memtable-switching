@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [
+members = [ "sandbox",
     "workload-gen",
     "workload-gen-cli",
 ]

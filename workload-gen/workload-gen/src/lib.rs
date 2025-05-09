@@ -142,7 +142,7 @@ pub mod spec {
     pub(crate) struct WorkloadSpecSection {
         /// A list of operation groups that share keys between operations.
         ///
-        /// E.g. non-empty point queries will use a key from an insert in this group.
+        /// E.g., non-empty point queries will use a key from an insert in this group.
         pub(crate) groups: Vec<WorkloadSpecGroup>,
         /// The domain from which the keys will be created from.
         #[serde(default = "KeySpace::default")]
@@ -479,7 +479,7 @@ pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) ->
     return Ok(());
 }
 
-/// Takes in a json representation of a workload specification and writes the workload to a file.
+/// Takes in a JSON representation of a workload specification and writes the workload to a file.
 pub fn generate_workload(workload_spec_string: &str, output_file: PathBuf) -> Result<()> {
     let workload_spec: WorkloadSpec =
         serde_json::from_str(workload_spec_string).context("parsing json file")?;

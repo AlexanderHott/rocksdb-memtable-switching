@@ -59,6 +59,8 @@ Options:
 - [ ] run a check of the workload spec before generating to check for errors like more deletes than valid keys or having
   non-empty pqs without any inserts
 
+- [ ] warnings about keyspace and how picking a small space could lead to lots of failed generation of empty point queries
+
 ### Extra Data structures
 
 At a minimum, we need a `Vec<Option<Box[u8]>>` holding valid keys.
@@ -71,3 +73,9 @@ At a minimum, we need a `Vec<Option<Box[u8]>>` holding valid keys.
 | Point Queries       | Append to valid keys. Pick a random index in valid keys.                                                                                                                                                                                                                                                                            |         |                                                     |               |               |                     |
 | Range Queries       | Either store keys in a BTreeSet or sort valid keys before each range query. Pick an index between 0 and the max beginning of the valid range.                                                                                                                                                                                       |         | When sorting the valid keys, also filter out `None` |               |               |                     |
 | Empty Point Queries | Generate the inserts, and then generate n empty queries. Find out how many invalid empty point queries, generate that many. Loop until all valid empty queries, shuffle the operations. Alternatively, instead of keeping all the operations in memory, keep offsets in the file of where you need to write and fill them in later. |         |                                                     |               |               |                     |
+
+## Profiling
+
+```bash
+cargo flamegraph --unit-test workload_gen -- workload_1m_i
+```

@@ -513,6 +513,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
+dependencies = [
+ "num-traits",
+ "rand 0.9.1",
+]
+
+[[package]]
 name = "rand_xoshiro"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -583,6 +593,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sandbox"
+version = "0.1.0"
+dependencies = [
+ "rand 0.9.1",
+ "rand_distr 0.5.1",
 ]
 
 [[package]]
@@ -878,7 +896,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "rand 0.9.1",
- "rand_distr",
+ "rand_distr 0.4.3",
  "rand_xoshiro",
  "schemars",
  "serde",
