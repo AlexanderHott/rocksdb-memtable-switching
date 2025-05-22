@@ -61,6 +61,9 @@ Options:
 
 - [ ] warnings about keyspace and how picking a small space could lead to lots of failed generation of empty point queries
 
+- [ ] create some sort of workload planner (similar to a query planner) that chooses the correct data structure to use based on the combinations of operations
+  - e.g. for empty point queries: deletes ? hash_set : bloom_filter. To check inclusion
+
 ### Extra Data structures
 
 At a minimum, we need a `Vec<Option<Box[u8]>>` holding valid keys.

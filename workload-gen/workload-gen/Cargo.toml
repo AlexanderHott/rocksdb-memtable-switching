@@ -11,6 +11,7 @@ schemars = "0.8.21"
 serde = { version = "1.0.219", features = ["serde_derive"] }
 serde_json = "1.0.140"
 rand_xoshiro = "0.7.0"
+bloom = "0.3.2"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

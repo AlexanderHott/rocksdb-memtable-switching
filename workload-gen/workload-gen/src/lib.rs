@@ -229,8 +229,283 @@ mod schema {
     }
 }
 
+mod keyset {
+    use crate::Key;
+    use bloom::{BloomFilter, ASMS};
+    use rand::Rng;
+    use rand_xoshiro::Xoshiro256Plus;
+    use std::collections::{HashMap, HashSet};
+
+    pub trait KeySet {
+        fn new(capacity: usize) -> Self;
+
+        fn len(&self) -> usize;
+
+        fn is_empty(&self) -> bool;
+
+        fn push(&mut self, key: Key);
+
+        fn remove(&mut self, idx: usize) -> Key;
+
+        fn get(&self, idx: usize) -> Option<&Key>;
+
+        fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key;
+
+        fn contains(&self, key: &Key) -> bool;
+
+        fn sort(&mut self);
+    }
+
+    pub struct VecKeySet {
+        keys: Vec<Key>,
+        sorted: bool,
+    }
+
+    impl KeySet for VecKeySet {
+        fn new(capacity: usize) -> Self {
+            return Self {
+                keys: Vec::with_capacity(capacity),
+                sorted: true,
+            };
+        }
+
+        fn len(&self) -> usize {
+            return self.keys.len();
+        }
+
+        fn is_empty(&self) -> bool {
+            return self.keys.is_empty();
+        }
+
+        fn push(&mut self, key: Key) {
+            if self.sorted && self.keys.last().is_some_and(|last_key| last_key > &key) {
+                self.sorted = false;
+            }
+            self.keys.push(key);
+        }
+
+        fn remove(&mut self, idx: usize) -> Key {
+            let key = self.keys.remove(idx);
+            return key;
+        }
+
+        fn get(&self, idx: usize) -> Option<&Key> {
+            return self.keys.get(idx);
+        }
+
+        fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key {
+            return self
+                .keys
+                .get(rng.random_range(0..self.keys.len()))
+                .expect("KeySet to not be empty");
+        }
+
+        fn contains(&self, key: &Key) -> bool {
+            return self.keys.contains(key);
+        }
+
+        fn sort(&mut self) {
+            if !self.sorted {
+                self.keys.sort();
+                self.sorted = true;
+            }
+        }
+    }
+    pub struct VecHashSetKeySet {
+        keys: Vec<Key>,
+        key_set: HashSet<Key>,
+        sorted: bool,
+    }
+
+    impl KeySet for VecHashSetKeySet {
+        fn new(capacity: usize) -> Self {
+            return Self {
+                keys: Vec::with_capacity(capacity),
+                key_set: HashSet::with_capacity(capacity),
+                sorted: true,
+            };
+        }
+
+        fn len(&self) -> usize {
+            return self.keys.len();
+        }
+
+        fn is_empty(&self) -> bool {
+            return self.keys.is_empty();
+        }
+
+        fn push(&mut self, key: Key) {
+            if self.sorted && self.keys.last().is_some_and(|last_key| last_key > &key) {
+                self.sorted = false;
+            }
+            self.keys.push(key.clone());
+            self.key_set.insert(key);
+        }
+
+        fn remove(&mut self, idx: usize) -> Key {
+            let key = self.keys.remove(idx);
+            self.key_set.remove(&key);
+            return key;
+        }
+
+        fn get(&self, idx: usize) -> Option<&Key> {
+            return self.keys.get(idx);
+        }
+
+        fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key {
+            return self
+                .keys
+                .get(rng.random_range(0..self.keys.len()))
+                .expect("KeySet to not be empty");
+        }
+
+        fn contains(&self, key: &Key) -> bool {
+            return self.key_set.contains(key);
+        }
+
+        fn sort(&mut self) {
+            if !self.sorted {
+                self.keys.sort();
+                self.sorted = true;
+            }
+        }
+    }
+    pub struct VecBloomFilterKeySet {
+        keys: Vec<Key>,
+        bf: BloomFilter,
+        sorted: bool,
+    }
+
+    impl KeySet for VecBloomFilterKeySet {
+        fn new(capacity: usize) -> Self {
+            return Self {
+                keys: Vec::with_capacity(capacity),
+                bf: BloomFilter::with_rate(0.01, capacity as u32),
+                sorted: true,
+            };
+        }
+
+        fn len(&self) -> usize {
+            return self.keys.len();
+        }
+
+        fn is_empty(&self) -> bool {
+            return self.keys.is_empty();
+        }
+
+        fn push(&mut self, key: Key) {
+            if self.sorted && self.keys.last().is_some_and(|last_key| last_key > &key) {
+                self.sorted = false;
+            }
+            self.bf.insert(&key);
+            self.keys.push(key);
+        }
+
+        fn remove(&mut self, idx: usize) -> Key {
+            let key = self.keys.remove(idx);
+            self.bf.clear();
+            for k in &self.keys {
+                self.bf.insert(k);
+            }
+            return key;
+        }
+
+        fn get(&self, idx: usize) -> Option<&Key> {
+            return self.keys.get(idx);
+        }
+
+        fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key {
+            return self
+                .keys
+                .get(rng.random_range(0..self.keys.len()))
+                .expect("KeySet to not be empty");
+        }
+
+        fn contains(&self, key: &Key) -> bool {
+            return self.bf.contains(key);
+        }
+
+        fn sort(&mut self) {
+            if !self.sorted {
+                self.keys.sort();
+                self.sorted = true;
+            }
+        }
+    }
+
+    pub struct VecHashMapIndexKeySet {
+        keys: Vec<Key>,
+        key_to_index: HashMap<Key, usize>,
+        sorted: bool,
+    }
+
+    impl KeySet for VecHashMapIndexKeySet {
+        fn new(capacity: usize) -> Self {
+            return Self {
+                keys: Vec::with_capacity(capacity),
+                key_to_index: HashMap::with_capacity(capacity),
+                sorted: true,
+            };
+        }
+
+        fn len(&self) -> usize {
+            return self.keys.len();
+        }
+
+        fn is_empty(&self) -> bool {
+            return self.keys.is_empty();
+        }
+
+        fn push(&mut self, key: Key) {
+            if !self.key_to_index.contains_key(&key) {
+                self.key_to_index.insert(key.clone(), self.keys.len());
+                self.keys.push(key);
+            }
+        }
+
+        fn remove(&mut self, idx: usize) -> Key {
+            assert!(idx < self.keys.len());
+
+            // Swap with last, pop, and update hashmap
+            self.keys.swap(idx, self.keys.len() - 1);
+            let removed = self.keys.pop().unwrap();
+            self.key_to_index.remove(&removed);
+
+            // Update index of swapped element if necessary
+            if idx < self.keys.len() {
+                let swapped_key = &self.keys[idx];
+                self.key_to_index.insert(swapped_key.clone(), idx);
+            }
+
+            return removed;
+        }
+
+        fn get(&self, idx: usize) -> Option<&Key> {
+            return self.keys.get(idx);
+        }
+
+        fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key {
+            let idx = rng.random_range(0..self.keys.len());
+            return &self.keys[idx];
+        }
+
+        fn contains(&self, key: &Key) -> bool {
+            return self.key_to_index.contains_key(key);
+        }
+
+        fn sort(&mut self) {
+            self.keys.sort();
+            self.key_to_index.clear();
+            for (i, key) in self.keys.iter().enumerate() {
+                self.key_to_index.insert(key.clone(), i);
+            }
+        }
+    }
+}
+
 pub use crate::schema::generate_workload_spec_schema;
 use crate::spec::WorkloadSpec;
+use crate::keyset::{KeySet, VecHashSetKeySet, VecKeySet};
 
 type Key = Box<[u8]>;
 
@@ -294,66 +569,11 @@ fn gen_string(rng: &mut Xoshiro256Plus, len: usize) -> Key {
     return rng.sample_iter(Alphanumeric).take(len).collect();
 }
 
-struct KeySet {
-    keys: Vec<Key>,
-    sorted: bool,
-}
-
-impl KeySet {
-    fn new(capacity: usize) -> Self {
-        return KeySet {
-            keys: Vec::with_capacity(capacity),
-            sorted: true,
-        };
-    }
-
-    fn len(&self) -> usize {
-        return self.keys.len();
-    }
-
-    fn is_empty(&self) -> bool {
-        return self.keys.is_empty();
-    }
-
-    fn push(&mut self, key: Key) {
-        if self.sorted && self.keys.last().is_some_and(|last_key| last_key > &key) {
-            self.sorted = false;
-        }
-        self.keys.push(key);
-    }
-
-    fn remove(&mut self, idx: usize) -> Key {
-        return self.keys.remove(idx);
-    }
-
-    fn get(&self, idx: usize) -> Option<&Key> {
-        return self.keys.get(idx);
-    }
-
-    fn get_random(&self, rng: &mut Xoshiro256Plus) -> &Key {
-        return self
-            .keys
-            .get(rng.random_range(0..self.keys.len()))
-            .expect("KeySet to not be empty");
-    }
-
-    fn contains(&self, key: &Key) -> bool {
-        return self.keys.contains(key);
-    }
-
-    fn sort(&mut self) {
-        if !self.sorted {
-            self.keys.sort();
-            self.sorted = true;
-        }
-    }
-}
-
 pub fn write_operations(mut writer: &mut impl Write, workload: &WorkloadSpec) -> Result<()> {
     let mut rng = Xoshiro256Plus::from_os_rng();
 
     for section in &workload.sections {
-        let mut keys_valid = KeySet::new(section.insert_count());
+        let mut keys_valid = keyset::VecBloomFilterKeySet::new(section.insert_count());
 
         for group in &section.groups {
             let rng_ref = &mut rng;
