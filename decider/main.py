@@ -177,7 +177,7 @@ def run_workload():
         return
     study = optuna.create_study(direction="minimize", study_name=objective.name)
 
-    output = open("presentation/out.csv", "w")
+    # output = open("presentation/out.csv", "w")
 
     df = pd.read_csv("./data.csv")
     for i, (_, row) in enumerate(df.iterrows()):
@@ -227,10 +227,10 @@ def run_workload():
             logging.info(f"Ending study {study.study_name}")
             break
         study.tell(trial, ret)
-        output.write(f"{ret}\n")
-        output.flush()
+        # output.write(f"{ret}\n")
+        # output.flush()
 
-    output.close()
+    # output.close()
     sock.close()
     study.trials_dataframe().to_csv(f"{study.study_name}-results.csv")
 

@@ -4,7 +4,7 @@
 #include "../third_party/json.hpp"
 
 namespace cfg {
-    using json = nlohmann::json;
+    using jsonns = nlohmann::json;
 
     struct CfgOpts {
         bool create_if_missing;
@@ -45,7 +45,7 @@ namespace cfg {
         static std::shared_ptr<RocksdbOptions> from_file(const std::string &filename);
 
     private:
-        static std::optional<json> read_json(const std::string &filename);
+        static std::optional<jsonns> read_json(const std::string &filename);
 
         [[nodiscard]] std::shared_ptr<RocksdbOptions> into_rocksdb() const;
     };
