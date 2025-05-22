@@ -28,6 +28,6 @@ cmake --build ./cmake-build-release --target main -DCMAKE_BUILD_TYPE=Release && 
 ### Debug Build
 
 ```bash
-cmake --build cmake-build-debug --target rocksdb -- -j32
+cmake --build cmake-build-debug --target rocksdb -- -j$(nproc)
 cmake --build ./cmake-build-debug --target main  && ./cmake-build-debug/main
 ```

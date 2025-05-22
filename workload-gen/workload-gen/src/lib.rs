@@ -467,7 +467,8 @@ mod keyset {
             assert!(idx < self.keys.len());
 
             // Swap with last, pop, and update hashmap
-            self.keys.swap(idx, self.keys.len() - 1);
+            let swap_idx = self.keys.len() - 1;
+            self.keys.swap(idx, swap_idx);
             let removed = self.keys.pop().unwrap();
             self.key_to_index.remove(&removed);
 
@@ -503,9 +504,9 @@ mod keyset {
     }
 }
 
+use crate::keyset::KeySet;
 pub use crate::schema::generate_workload_spec_schema;
 use crate::spec::WorkloadSpec;
-use crate::keyset::{KeySet, VecHashSetKeySet, VecKeySet};
 
 type Key = Box<[u8]>;
 
